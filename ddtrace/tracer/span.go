@@ -196,7 +196,7 @@ func (s *Span) clear() {
 	}
 	// Clear maps — retains allocated bucket storage for reuse.
 	// TODO: discard large maps and replace them with small maps to avoid holding on to memory.
-	clear(s.meta)
+	s.meta = traceinternal.SpanMeta{}
 	clear(s.metrics)
 	clear(s.metaStruct)
 	// Zero all fields (context ptr, slices, strings, etc.).

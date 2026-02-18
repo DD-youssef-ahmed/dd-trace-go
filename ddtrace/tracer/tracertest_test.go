@@ -149,7 +149,7 @@ func (a *testAgent) handleTracesV1(w http.ResponseWriter, r *http.Request) {
 // It sets the global tracer (required for span.Finish to push chunks through the pipeline).
 func newTracerTest(tb testing.TB, agent *testAgent) *tracer {
 	tb.Helper()
-	transport := newHTTPTransport(agent.URL(), internal.DefaultHTTPClient(defaultHTTPTimeout, true))
+	transport := newHTTPTransport(agent.URL()+tracesAPIPath, agent.URL()+statsAPIPath, internal.DefaultHTTPClient(defaultHTTPTimeout, true), datadogHeaders())
 	tr, err := newTracer(
 		withTransport(transport),
 		WithHTTPClient(internal.DefaultHTTPClient(defaultHTTPTimeout, true)),

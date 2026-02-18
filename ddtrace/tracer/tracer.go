@@ -712,6 +712,7 @@ func (t *tracer) worker(tick <-chan time.Time) {
 			if len(trace.spans) > 0 {
 				t.traceWriter.add(trace.spans)
 			}
+			releaseSpans(trace.spans)
 		case <-tick:
 			t.statsd.Incr("datadog.tracer.flush_triggered", []string{"reason:scheduled"}, 1)
 			t.traceWriter.flush()
@@ -739,6 +740,7 @@ func (t *tracer) worker(tick <-chan time.Time) {
 					if len(trace.spans) > 0 {
 						t.traceWriter.add(trace.spans)
 					}
+					releaseSpans(trace.spans)
 				default:
 					break loop
 				}
@@ -867,17 +869,16 @@ func spanStart(operationName string, sharedAttrs *traceinternal.SpanAttributes, 
 		id = generateSpanID(startTime)
 	}
 	// span defaults
-	span := &Span{
-		name:          operationName,
-		service:       parentService, // inherit from parent if available
-		serviceSource: parentServiceSource,
-		resource:      operationName,
-		spanID:        id,
-		traceID:       id,
-		start:         startTime,
-		integration:   "manual",
-		meta:          traceinternal.NewSpanMeta(sharedAttrs), // COW: shared until a per-span field is set
-	}
+	span := acquireSpan()
+	span.name = operationName
+	span.service = parentService // inherit from parent if available
+	span.serviceSource = parentServiceSource
+	span.resource = operationName
+	span.spanID = id
+	span.traceID = id
+	span.start = startTime
+	span.integration = "manual"
+	span.meta = traceinternal.NewSpanMeta(sharedAttrs) // COW: shared until a per-span field is set
 
 	span.spanLinks = append(span.spanLinks, opts.SpanLinks...)
 

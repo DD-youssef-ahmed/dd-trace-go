@@ -162,7 +162,7 @@ func (c *SpanContext) clear() {
 	c.errors.Store(0)
 	c.reparentID = ""
 	c.isRemote = false
-	c.traceID = emptyTraceID
+	c.traceID = traceID{}
 	c.spanID = 0
 	c.baggage = nil
 	atomic.StoreUint32(&c.hasBaggage, 0)
