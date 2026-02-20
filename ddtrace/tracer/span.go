@@ -188,17 +188,15 @@ func (s *Span) clear() {
 	// channel send happens before the deferred unlock. Acquiring the lock
 	// here guarantees finish() has fully completed before we zero the struct.
 	s.mu.Lock()
-	// Nil out the SpanContext pointer so the span doesn't hold it when
-	// returned to the pool. Don't implement something likecontext.clear()
-	// because external code may still hold a *SpanContext obtained via
-	// span.Context() and read from it concurrently. A fresh SpanContext
-	// is created on reuse (newSpanContext), so the old one just needs GC.
-	s.context = nil
-	// Clear maps — retains allocated bucket storage for reuse.
-	// TODO: discard large maps and replace them with small maps to avoid holding on to memory.
+	// Don't nil s.context here. External code may still call Context()
+	// after Finish(). A fresh SpanContext is assigned on reuse
+	// (newSpanContext in spanStart), so the old one is naturally replaced.
+	// Replace maps with fresh ones instead of clearing in-place.
+	// Old goroutines that still iterate over the previous maps (e.g., msgpack
+	// encoding) keep a stable reference and won't race with us.
 	s.meta = traceinternal.SpanMeta{}
-	clear(s.metrics)
-	clear(s.metaStruct)
+	s.metrics = make(map[string]float64, 1)
+	s.metaStruct = nil
 	// Zero all fields (context ptr, slices, strings, etc.).
 	s.name = ""
 	s.service = ""
@@ -230,7 +228,10 @@ func (s *Span) Context() *SpanContext {
 	if s == nil {
 		return nil
 	}
-	return s.context
+	s.mu.RLock()
+	ctx := s.context
+	s.mu.RUnlock()
+	return ctx
 }
 
 type inheritedData struct {
@@ -560,13 +561,19 @@ func (s *Span) setProcessTags(pTags string) {
 // root returns the root span of the span's trace. The return value shouldn't be
 // nil as long as the root span is valid and not finished.
 func (s *Span) Root() *Span {
-	if s == nil || s.context == nil {
+	if s == nil {
 		return nil
 	}
-	if s.context.trace == nil {
+	s.mu.RLock()
+	ctx := s.context
+	s.mu.RUnlock()
+	if ctx == nil {
 		return nil
 	}
-	return s.context.trace.root
+	if ctx.trace == nil {
+		return nil
+	}
+	return ctx.trace.root
 }
 
 // SetUser associates user information to the current trace which the
@@ -641,7 +648,6 @@ func (s *Span) StartChild(operationName string, opts ...StartSpanOption) *Span {
 
 // setSamplingPriorityLocked updates the sampling priority.
 // It also updates the trace's sampling priority.
-// s.mu must be held for writing.
 // +checklocks:s.mu
 func (s *Span) setSamplingPriorityLocked(priority int, sampler samplernames.SamplerName) {
 	assert.RWMutexLocked(&s.mu)
@@ -659,7 +665,6 @@ func (s *Span) setSamplingPriorityLocked(priority int, sampler samplernames.Samp
 // If the trace is locked, the sampling priority is forced to the given value.
 //
 // This function is should only be used when applying a manual keep or drop decision.
-// s.mu must be held for writing.
 // +checklocks:s.mu
 func (s *Span) forceSetSamplingPriorityLocked(priority int, sampler samplernames.SamplerName) {
 	assert.RWMutexLocked(&s.mu)
@@ -694,7 +699,7 @@ func (s *Span) setErrorFlagLocked(yes bool) {
 }
 
 // setTagErrorLocked sets the error tag. It accounts for various valid scenarios.
-// s.mu must be held for writing.
+// This method assumes the span lock is already held.
 // +checklocks:s.mu
 func (s *Span) setTagErrorLocked(value any, cfg errorConfig) {
 	assert.RWMutexLocked(&s.mu)
