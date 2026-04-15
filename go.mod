@@ -30,28 +30,28 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/tinylib/msgp v1.6.3
 	github.com/trailofbits/go-mutexasserts v0.0.0-20250514102930-c1f3d2e37561
-	go.opentelemetry.io/collector/pdata/pprofile v0.145.1-0.20260205185216-81bc641f26c0
-	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.64.0
-	go.opentelemetry.io/otel v1.41.0
+	go.opentelemetry.io/collector/pdata/pprofile v0.147.0
+	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.65.0
+	go.opentelemetry.io/otel v1.42.0
 	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc v0.14.0
 	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp v0.14.0
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v1.39.0
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.39.0
 	go.opentelemetry.io/otel/log v0.15.0
-	go.opentelemetry.io/otel/metric v1.41.0
+	go.opentelemetry.io/otel/metric v1.42.0
 	go.opentelemetry.io/otel/sdk v1.40.0
 	go.opentelemetry.io/otel/sdk/log v0.14.0
 	go.opentelemetry.io/otel/sdk/metric v1.40.0
-	go.opentelemetry.io/otel/trace v1.41.0
-	go.opentelemetry.io/proto/otlp v1.9.0
+	go.opentelemetry.io/otel/trace v1.42.0
+	go.opentelemetry.io/proto/otlp v1.10.0
 	go.uber.org/goleak v1.3.0
 	go.yaml.in/yaml/v3 v3.0.4
-	golang.org/x/exp v0.0.0-20260209203927-2842357ff358
-	golang.org/x/mod v0.33.0
+	golang.org/x/exp v0.0.0-20260312153236-7ab1446f8b90
+	golang.org/x/mod v0.34.0
 	golang.org/x/sync v0.20.0
 	golang.org/x/sys v0.42.0
 	golang.org/x/time v0.15.0
-	golang.org/x/tools v0.42.0
+	golang.org/x/tools v0.43.0
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da
 	google.golang.org/protobuf v1.36.11
 )
@@ -59,14 +59,9 @@ require (
 require (
 	github.com/DataDog/datadog-agent/comp/core/tagger/origindetection v0.77.0 // indirect
 	github.com/DataDog/datadog-agent/pkg/opentelemetry-mapping-go/otlp/attributes v0.77.0 // indirect
-	github.com/DataDog/datadog-agent/pkg/template v0.77.0 // indirect
 	github.com/DataDog/datadog-agent/pkg/trace v0.77.0 // indirect
 	github.com/DataDog/datadog-agent/pkg/trace/log v0.77.0 // indirect
-	github.com/DataDog/datadog-agent/pkg/trace/otel v0.77.0 // indirect
-	github.com/DataDog/datadog-agent/pkg/util/log v0.77.0 // indirect
-	github.com/DataDog/datadog-agent/pkg/util/scrubber v0.77.0 // indirect
-	github.com/DataDog/datadog-agent/pkg/version v0.77.0 // indirect
-	github.com/DataDog/go-sqllexer v0.1.13 // indirect
+	github.com/DataDog/go-sqllexer v0.2.1 // indirect
 	github.com/DataDog/go-tuf v1.1.1-0.5.2 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
@@ -77,7 +72,7 @@ require (
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
-	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.4 // indirect
+	github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 // indirect
 	github.com/hashicorp/go-version v1.8.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20260216142805-b3301c5f2a88 // indirect
@@ -97,22 +92,19 @@ require (
 	github.com/tklauser/numcpus v0.11.0 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
-	go.opentelemetry.io/collector/component v1.51.1-0.20260205185216-81bc641f26c0 // indirect
-	go.opentelemetry.io/collector/featuregate v1.51.1-0.20260205185216-81bc641f26c0 // indirect
-	go.opentelemetry.io/collector/pdata v1.51.1-0.20260205185216-81bc641f26c0 // indirect
+	go.opentelemetry.io/collector/component v1.53.0 // indirect
+	go.opentelemetry.io/collector/featuregate v1.53.0 // indirect
+	go.opentelemetry.io/collector/pdata v1.53.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/mock v0.6.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.1 // indirect
-	golang.org/x/crypto v0.49.0 // indirect
-	golang.org/x/net v0.51.0 // indirect
+	golang.org/x/net v0.52.0 // indirect
 	golang.org/x/text v0.35.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20251222181119-0a764e51fe1b // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20260209200024-4cfbd4190f57 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260209200024-4cfbd4190f57 // indirect
 	google.golang.org/grpc v1.79.3 // indirect
-	gopkg.in/ini.v1 v1.67.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	k8s.io/apimachinery v0.35.1 // indirect
 )
 
 retract (
@@ -120,3 +112,15 @@ retract (
 	[v2.0.0-beta.1, v2.0.0-beta.11]
 	v2.0.0-20240516153256-8d6fa2bea61d
 )
+
+replace github.com/DataDog/datadog-agent/pkg/proto => /Users/sam.maya/go/src/github.com/DataDog/datadog-agent/pkg/proto
+
+replace github.com/DataDog/datadog-agent/pkg/trace/stats => /Users/sam.maya/go/src/github.com/DataDog/datadog-agent/pkg/trace/stats
+
+replace github.com/DataDog/datadog-agent/pkg/trace => /Users/sam.maya/go/src/github.com/DataDog/datadog-agent/pkg/trace
+
+replace github.com/DataDog/datadog-agent/pkg/obfuscate => /Users/sam.maya/go/src/github.com/DataDog/datadog-agent/pkg/obfuscate
+
+replace github.com/DataDog/datadog-agent/pkg/trace/traceutil => /Users/sam.maya/go/src/github.com/DataDog/datadog-agent/pkg/trace/traceutil
+
+replace github.com/DataDog/datadog-agent/pkg/trace/log => /Users/sam.maya/go/src/github.com/DataDog/datadog-agent/pkg/trace/log

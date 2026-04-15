@@ -170,19 +170,20 @@ func (c *concentrator) newTracerStatSpan(s *Span, obfuscator *obfuscate.Obfuscat
 	httpEndpoint := s.meta[ext.HTTPEndpoint]
 
 	statSpan, ok := c.spanConcentrator.NewStatSpanWithConfig(stats.StatSpanConfig{
-		Service:      s.service,
-		Resource:     resource,
-		Name:         s.name,
-		Type:         s.spanType,
-		ParentID:     s.parentID,
-		Start:        s.start,
-		Duration:     s.duration,
-		Error:        s.error,
-		Meta:         s.meta,
-		Metrics:      s.metrics,
-		PeerTags:     c.cfg.agent.load().peerTags,
-		HTTPMethod:   httpMethod,
-		HTTPEndpoint: httpEndpoint,
+		Service:                 s.service,
+		Resource:                resource,
+		Name:                    s.name,
+		Type:                    s.spanType,
+		ParentID:                s.parentID,
+		Start:                   s.start,
+		Duration:                s.duration,
+		Error:                   s.error,
+		Meta:                    s.meta,
+		Metrics:                 s.metrics,
+		PeerTags:                c.cfg.agent.load().peerTags,
+		AdditionalMetricTagKeys: c.cfg.internalConfig.StatsAdditionalTags(),
+		HTTPMethod:              httpMethod,
+		HTTPEndpoint:            httpEndpoint,
 	})
 	if !ok {
 		return nil, false

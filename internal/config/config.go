@@ -101,7 +101,11 @@ type Config struct {
 	// from DD_TRACE_PARTIAL_FLUSH_ENABLED, default false.
 	partialFlushEnabled bool
 	// statsComputationEnabled enables client-side stats computation (aka trace metrics).
-	statsComputationEnabled      bool
+	statsComputationEnabled bool
+	// statsAdditionalTags is a list of tag keys to extract from spans and use as
+	// additional aggregation dimensions for client-side stats.
+	// Configured via DD_TRACE_STATS_ADDITIONAL_TAGS (comma-separated).
+	statsAdditionalTags []string
 	dataStreamsMonitoringEnabled bool
 	// dynamicInstrumentationEnabled controls if the target application can be modified by Dynamic Instrumentation or not.
 	dynamicInstrumentationEnabled bool
@@ -206,6 +210,15 @@ func loadConfig() *Config {
 	cfg.partialFlushMinSpans = p.GetIntWithValidator("DD_TRACE_PARTIAL_FLUSH_MIN_SPANS", 1000, validatePartialFlushMinSpans)
 	cfg.partialFlushEnabled = p.GetBool("DD_TRACE_PARTIAL_FLUSH_ENABLED", false)
 	cfg.statsComputationEnabled = p.GetBool("DD_TRACE_STATS_COMPUTATION_ENABLED", true)
+	if v := p.GetString("DD_TRACE_STATS_ADDITIONAL_TAGS", ""); v != "" {
+		var tags []string
+		for _, t := range strings.Split(v, ",") {
+			if t = strings.TrimSpace(t); t != "" {
+				tags = append(tags, t)
+			}
+		}
+		cfg.statsAdditionalTags = tags
+	}
 	cfg.dataStreamsMonitoringEnabled = p.GetBool("DD_DATA_STREAMS_ENABLED", false)
 	cfg.dynamicInstrumentationEnabled = p.GetBool("DD_DYNAMIC_INSTRUMENTATION_ENABLED", false)
 	cfg.ciVisibilityEnabled = p.GetBool(constants.CIVisibilityEnabledEnvironmentVariable, false)
@@ -619,6 +632,22 @@ func (c *Config) SetStatsComputationEnabled(enabled bool, origin telemetry.Origi
 	}
 	c.statsComputationEnabled = enabled
 	configtelemetry.Report("DD_TRACE_STATS_COMPUTATION_ENABLED", enabled, origin)
+}
+
+func (c *Config) StatsAdditionalTags() []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.statsAdditionalTags
+}
+
+func (c *Config) SetStatsAdditionalTags(tags []string, origin telemetry.Origin, product ...Product) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.checkProductConflict("DD_TRACE_STATS_ADDITIONAL_TAGS", origin, tags, product...) {
+		return
+	}
+	c.statsAdditionalTags = tags
+	configtelemetry.Report("DD_TRACE_STATS_ADDITIONAL_TAGS", tags, origin)
 }
 
 func (c *Config) LogDirectory() string {
