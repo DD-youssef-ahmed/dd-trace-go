@@ -148,6 +148,8 @@ type Config struct {
 	traceID128BitEnabled bool
 	// apiKey is the Datadog API key from DD_API_KEY (used for agentless intake, LLM Obs, etc.).
 	apiKey string
+	// sendRetries is the number of times a trace or CI Visibility payload send is retried upon failure.
+	sendRetries int
 }
 
 // checkProductConflict enforces the cross-product gate for programmatic API calls.
@@ -286,6 +288,9 @@ func loadConfig() *Config {
 	}
 
 	cfg.apiKey = env.Get("DD_API_KEY")
+
+	// Default: no extra send retries until WithSendRetries or SetSendRetries runs.
+	cfg.sendRetries = 0
 
 	return cfg
 }
@@ -1005,4 +1010,22 @@ func (c *Config) APIKey() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.apiKey
+}
+
+// SendRetries returns the configured retry count for payload sends.
+func (c *Config) SendRetries() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.sendRetries
+}
+
+// SetSendRetries sets the retry count for payload sends.
+func (c *Config) SetSendRetries(retries int, origin telemetry.Origin, product ...Product) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.checkProductConflict("sendRetries", origin, retries, product...) {
+		return
+	}
+	c.sendRetries = retries
+	configtelemetry.Report("sendRetries", retries, origin)
 }

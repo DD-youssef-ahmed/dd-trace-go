@@ -885,3 +885,19 @@ func TestAPIKey(t *testing.T) {
 		assert.Equal(t, "", cfg.APIKey())
 	})
 }
+
+func TestSendRetries(t *testing.T) {
+	t.Run("default_zero", func(t *testing.T) {
+		resetGlobalState()
+		defer resetGlobalState()
+		cfg := Get()
+		assert.Equal(t, 0, cfg.SendRetries())
+	})
+	t.Run("setter_updates_value", func(t *testing.T) {
+		resetGlobalState()
+		defer resetGlobalState()
+		cfg := Get()
+		cfg.SetSendRetries(5, telemetry.OriginCode)
+		assert.Equal(t, 5, cfg.SendRetries())
+	})
+}
