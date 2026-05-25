@@ -44,7 +44,7 @@ const (
 //   - Metrics-specific OTLP Exporter Configurations: OTEL_EXPORTER_OTLP_METRICS_TIMEOUT,
 //     OTEL_EXPORTER_OTLP_METRICS_HEADERS, OTEL_EXPORTER_OTLP_METRICS_PROTOCOL, OTEL_EXPORTER_OTLP_METRICS_ENDPOINT
 //   - OpenTelemetry Metrics SDK Configurations: OTEL_METRIC_EXPORT_INTERVAL, OTEL_METRIC_EXPORT_TIMEOUT
-func registerTelemetry(cfg *config) {
+func registerTelemetry() {
 	telemetryConfigs := []telemetry.Configuration{}
 
 	// ===========================================
@@ -150,11 +150,6 @@ func registerTelemetry(cfg *config) {
 	})
 
 	telemetry.RegisterAppConfigs(telemetryConfigs...)
-}
-
-// registerNoopTelemetry reports that OTel metrics are disabled.
-func registerNoopTelemetry() {
-	// No telemetry to report when metrics are disabled
 }
 
 // parseMilliseconds parses a string value as milliseconds.

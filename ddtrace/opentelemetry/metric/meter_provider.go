@@ -11,6 +11,7 @@ import (
 
 	"github.com/DataDog/dd-trace-go/v2/internal/env"
 
+	"go.opentelemetry.io/otel"
 	otelmetric "go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/sdk/metric"
@@ -22,6 +23,34 @@ const (
 	envDDMetricsOtelEnabled = "DD_METRICS_OTEL_ENABLED"
 	envOtelMetricsExporter  = "OTEL_METRICS_EXPORTER"
 )
+
+// InstallGlobal creates a DD-configured MeterProvider and sets it as the global OTel meter provider.
+// Call this before tracer.Start() to enable OTel runtime metrics collection.
+//
+// The runtime metrics Producer (emitting go.schedule.duration) is auto-registered
+// here. Direct callers of NewMeterProvider get a clean MeterProvider and must
+// add the producer themselves with WithProducer(NewRuntimeProducer()) if they
+// want it.
+func InstallGlobal(opts ...Option) error {
+	allOpts := append([]Option{withRuntimeMetricsProducerDefault()}, opts...)
+	mp, err := NewMeterProvider(allOpts...)
+	if err != nil {
+		return err
+	}
+	otel.SetMeterProvider(mp)
+	return nil
+}
+
+// withRuntimeMetricsProducerDefault registers the default RuntimeProducer unless
+// the caller explicitly disabled it via WithoutRuntimeMetricsProducer.
+func withRuntimeMetricsProducerDefault() Option {
+	return optionFunc(func(c *config) {
+		if c.disableRuntimeMetricsProducer {
+			return
+		}
+		c.producers = append(c.producers, NewRuntimeProducer())
+	})
+}
 
 // NewMeterProvider creates a new MeterProvider configured with Datadog-specific settings:
 // - Resource with DD service, env, version, hostname, and tags
@@ -42,45 +71,36 @@ func NewMeterProvider(opts ...Option) (otelmetric.MeterProvider, error) {
 
 // NewMeterProviderWithContext creates a new MeterProvider with a custom context.
 func NewMeterProviderWithContext(ctx context.Context, opts ...Option) (otelmetric.MeterProvider, error) {
-	// Check if metrics are enabled via environment variables
 	if !isMetricsEnabled() {
-		// Report to telemetry that metrics are disabled
-		registerNoopTelemetry()
-		// Return a no-op MeterProvider that doesn't export metrics
 		return noop.NewMeterProvider(), nil
 	}
 
-	// Apply configuration options
 	cfg := newConfig()
 	for _, opt := range opts {
 		opt.apply(cfg)
 	}
 
-	// Report configuration to telemetry
-	registerTelemetry(cfg)
+	registerTelemetry()
 
-	// Build Datadog-specific resource
 	res, err := buildDatadogResource(ctx, cfg.resourceOptions...)
 	if err != nil {
 		return nil, err
 	}
 
-	// Create OTLP exporter with DD defaults (supports both HTTP and gRPC)
 	exporter, err := newDatadogOTLPExporter(ctx, cfg.httpExporterOptions, cfg.grpcExporterOptions)
 	if err != nil {
 		return nil, err
 	}
 
-	// Build metric reader with DD defaults
-	// Note: Temporality is configured via the exporter's TemporalitySelector option
-	// The default OTLP exporter uses cumulative, but we configure delta via exporter options
-	reader := metric.NewPeriodicReader(
-		exporter,
+	readerOpts := []metric.PeriodicReaderOption{
 		metric.WithInterval(cfg.exportInterval),
 		metric.WithTimeout(cfg.exportTimeout),
-	)
+	}
+	for _, p := range cfg.producers {
+		readerOpts = append(readerOpts, metric.WithProducer(p))
+	}
+	reader := metric.NewPeriodicReader(exporter, readerOpts...)
 
-	// Create the MeterProvider
 	return metric.NewMeterProvider(
 		metric.WithResource(res),
 		metric.WithReader(reader),
@@ -123,16 +143,15 @@ func isMetricsEnabled() bool {
 	return false
 }
 
-// isNoop returns true if the given MeterProvider is a no-op provider that doesn't export metrics.
-func isNoop(mp otelmetric.MeterProvider) bool {
+// IsNoop returns true if the given MeterProvider is a no-op provider (i.e. metrics are disabled).
+func IsNoop(mp otelmetric.MeterProvider) bool {
 	_, ok := mp.(noop.MeterProvider)
 	return ok
 }
 
 // Shutdown gracefully shuts down the MeterProvider, flushing any pending metrics.
-// For no-op providers, this is a no-op operation.
 func Shutdown(ctx context.Context, mp otelmetric.MeterProvider) error {
-	if isNoop(mp) {
+	if IsNoop(mp) {
 		return nil
 	}
 	if sdkMP, ok := mp.(*metric.MeterProvider); ok {
@@ -142,9 +161,8 @@ func Shutdown(ctx context.Context, mp otelmetric.MeterProvider) error {
 }
 
 // ForceFlush flushes any pending metrics.
-// For no-op providers, this is a no-op operation.
 func ForceFlush(ctx context.Context, mp otelmetric.MeterProvider) error {
-	if isNoop(mp) {
+	if IsNoop(mp) {
 		return nil
 	}
 	if sdkMP, ok := mp.(*metric.MeterProvider); ok {

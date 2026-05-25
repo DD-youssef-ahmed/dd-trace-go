@@ -10,26 +10,32 @@ import (
 
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
-	"go.opentelemetry.io/otel/sdk/instrumentation"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 )
 
 // config holds the configuration for the MeterProvider
 type config struct {
-	resourceOptions     []resource.Option
-	httpExporterOptions []otlpmetrichttp.Option
-	grpcExporterOptions []otlpmetricgrpc.Option
-	exportInterval      time.Duration
-	exportTimeout       time.Duration
-	temporalitySelector metric.TemporalitySelector
+	resourceOptions               []resource.Option
+	httpExporterOptions           []otlpmetrichttp.Option
+	grpcExporterOptions           []otlpmetricgrpc.Option
+	exportInterval                time.Duration
+	exportTimeout                 time.Duration
+	temporalitySelector           metric.TemporalitySelector
+	producers                     []metric.Producer
+	disableRuntimeMetricsProducer bool
 }
 
-// newConfig creates a default configuration
+// newConfig creates a default configuration. The export interval and timeout
+// honor the OTel SDK env vars OTEL_METRIC_EXPORT_INTERVAL and
+// OTEL_METRIC_EXPORT_TIMEOUT (in milliseconds) when set, otherwise fall back
+// to the package defaults.
 func newConfig() *config {
+	intervalMs := getMillisecondsConfig(envOtelMetricExportInterval, defaultExportIntervalMs)
+	timeoutMs := getMillisecondsConfig(envOtelMetricExportTimeout, defaultExportTimeoutMs)
 	return &config{
-		exportInterval: 60 * time.Second,
-		exportTimeout:  30 * time.Second,
+		exportInterval: time.Duration(intervalMs.value) * time.Millisecond,
+		exportTimeout:  time.Duration(timeoutMs.value) * time.Millisecond,
 	}
 }
 
@@ -64,12 +70,6 @@ func WithGRPCExporter(opts ...otlpmetricgrpc.Option) Option {
 	return optionFunc(func(c *config) {
 		c.grpcExporterOptions = append(c.grpcExporterOptions, opts...)
 	})
-}
-
-// WithExporter adds OTLP HTTP exporter options to the MeterProvider (deprecated).
-// Use WithHTTPExporter or WithGRPCExporter instead.
-func WithExporter(opts ...otlpmetrichttp.Option) Option {
-	return WithHTTPExporter(opts...)
 }
 
 // WithExportInterval sets the interval at which metrics are exported.
@@ -109,20 +109,19 @@ func WithTemporalitySelector(selector metric.TemporalitySelector) Option {
 	})
 }
 
-// AggregationSelector allows customization of aggregation for specific instruments
-type AggregationSelector = metric.AggregationSelector
-
-// View allows customization of metrics streams
-type View = metric.View
-
-// WithView adds a custom view to the MeterProvider
-func WithView(view View) Option {
-	// Note: This would require modifying the config structure to support views
-	// For now, this is a placeholder for future extension
+// WithProducer registers an additional sdkmetric.Producer on the reader.
+// The default RuntimeProducer (emitting go.schedule.duration) is registered
+// automatically; use WithoutRuntimeMetricsProducer to suppress it.
+func WithProducer(p metric.Producer) Option {
 	return optionFunc(func(c *config) {
-		// TODO: Add view support to config
+		c.producers = append(c.producers, p)
 	})
 }
 
-// Scope provides a namespace for instruments
-type Scope = instrumentation.Scope
+// WithoutRuntimeMetricsProducer suppresses the auto-registered RuntimeProducer.
+// Use this only if you want to register your own runtime metrics producer.
+func WithoutRuntimeMetricsProducer() Option {
+	return optionFunc(func(c *config) {
+		c.disableRuntimeMetricsProducer = true
+	})
+}
