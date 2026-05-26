@@ -11,6 +11,7 @@ import (
 
 	"github.com/DataDog/dd-trace-go/v2/internal/env"
 
+	"go.opentelemetry.io/otel"
 	otelmetric "go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/sdk/metric"
@@ -22,6 +23,46 @@ const (
 	envDDMetricsOtelEnabled = "DD_METRICS_OTEL_ENABLED"
 	envOtelMetricsExporter  = "OTEL_METRICS_EXPORTER"
 )
+
+// InstallGlobal creates a DD-configured MeterProvider and sets it as the global OTel meter provider.
+// Call this before tracer.Start() to enable the full DD OTLP metrics pipeline.
+// Note: this replaces any previously installed global MeterProvider.
+//
+// If DD_METRICS_OTEL_ENABLED is unset or false, this function is a no-op and does not
+// modify the global MeterProvider. This makes it safe to call unconditionally (e.g. from
+// Orchestrion-injected code) without clobbering a customer-installed provider.
+func InstallGlobal(opts ...Option) error {
+	// Short-circuit when metrics are disabled: do not touch the global MeterProvider.
+	// This prevents Orchestrion-injected calls from replacing a customer-installed
+	// provider with a noop when the feature is turned off.
+	if !isMetricsEnabled() {
+		return nil
+	}
+	allOpts := append([]Option{withRuntimeProducerDefault()}, opts...)
+	mp, err := NewMeterProvider(allOpts...)
+	if err != nil {
+		return err
+	}
+	otel.SetMeterProvider(mp)
+	return nil
+}
+
+// withRuntimeProducerDefault injects the RuntimeProducer unless the caller disabled it
+// or the DD_RUNTIME_METRICS_ENABLED env var is set to false.
+func withRuntimeProducerDefault() Option {
+	return optionFunc(func(c *config) {
+		if c.disableRuntimeProducer {
+			return
+		}
+		// Respect the user's opt-out of runtime metrics reporting.
+		// When DD_RUNTIME_METRICS_ENABLED=false, suppress automatic go.schedule.duration
+		// collection so the RuntimeProducer scope doesn't appear in exported metrics.
+		if runtimeMetricsDisabled := env.Get("DD_RUNTIME_METRICS_ENABLED"); runtimeMetricsDisabled == "false" || runtimeMetricsDisabled == "0" {
+			return
+		}
+		c.producers = append(c.producers, NewRuntimeProducer())
+	})
+}
 
 // NewMeterProvider creates a new MeterProvider configured with Datadog-specific settings:
 // - Resource with DD service, env, version, hostname, and tags
@@ -74,11 +115,14 @@ func NewMeterProviderWithContext(ctx context.Context, opts ...Option) (otelmetri
 	// Build metric reader with DD defaults
 	// Note: Temporality is configured via the exporter's TemporalitySelector option
 	// The default OTLP exporter uses cumulative, but we configure delta via exporter options
-	reader := metric.NewPeriodicReader(
-		exporter,
+	readerOpts := []metric.PeriodicReaderOption{
 		metric.WithInterval(cfg.exportInterval),
 		metric.WithTimeout(cfg.exportTimeout),
-	)
+	}
+	for _, p := range cfg.producers {
+		readerOpts = append(readerOpts, metric.WithProducer(p))
+	}
+	reader := metric.NewPeriodicReader(exporter, readerOpts...)
 
 	// Create the MeterProvider
 	return metric.NewMeterProvider(

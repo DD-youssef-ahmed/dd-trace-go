@@ -172,6 +172,8 @@ type tracer struct {
 	// runtimeMetrics is submitting runtime metrics to the agent using statsd.
 	runtimeMetrics *runtimemetrics.Emitter
 
+	otelRuntimeMetrics *otelRuntimeMetrics
+
 	// telemetry is the telemetry client for the tracer.
 	telemetry telemetry.Client
 
@@ -278,6 +280,14 @@ func Start(opts ...StartOption) error {
 			l.Debug("Runtime metrics v2 enabled.")
 		} else {
 			l.Error("Failed to enable runtime metrics v2", "err", err.Error())
+		}
+	}
+
+	if t.config.internalConfig.OtelRuntimeMetricsEnabled() && t.config.internalConfig.RuntimeMetricsEnabled() {
+		if t.otelRuntimeMetrics, err = startOtelRuntimeMetrics(gocontext.Background()); err != nil {
+			log.Warn("Failed to start OTel runtime metrics: %v", err.Error())
+		} else if t.otelRuntimeMetrics != nil {
+			log.Debug("OTel runtime metrics enabled.")
 		}
 	}
 
@@ -1056,6 +1066,9 @@ func (t *tracer) Stop() {
 	t.traceWriter.stop()
 	if t.runtimeMetrics != nil {
 		t.runtimeMetrics.Stop()
+	}
+	if t.otelRuntimeMetrics != nil {
+		t.otelRuntimeMetrics.stop()
 	}
 	t.statsd.Close()
 	if t.dataStreams != nil {
