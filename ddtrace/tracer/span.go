@@ -188,16 +188,13 @@ func (s *Span) clear() {
 	// channel send happens before the deferred unlock. Acquiring the lock
 	// here guarantees finish() has fully completed before we zero the struct.
 	s.mu.Lock()
-	// Don't nil s.context here. External code may still call Context()
-	// after Finish(). A fresh SpanContext is assigned on reuse
-	// (newSpanContext in spanStart), so the old one is naturally replaced.
-	// Replace maps with fresh ones instead of clearing in-place.
-	// Old goroutines that still iterate over the previous maps (e.g., msgpack
-	// encoding) keep a stable reference and won't race with us.
+	// s.context is intentionally not nilled: Context() may still be called
+	// after Finish(), and spanStart will reassign it on reuse.
+	// Maps are replaced (not cleared in place) so concurrent encoders keep
+	// a stable reference to the old map.
 	s.meta = traceinternal.SpanMeta{}
 	s.metrics = make(map[string]float64, 1)
 	s.metaStruct = nil
-	// Zero all fields (context ptr, slices, strings, etc.).
 	s.name = ""
 	s.service = ""
 	s.resource = ""
@@ -228,13 +225,10 @@ func (s *Span) Context() *SpanContext {
 	if s == nil {
 		return nil
 	}
-	// Plain read: s.context is a single pointer word and is only reassigned
-	// during span construction in spanStart (which holds s.mu). After Finish(),
-	// callers may still read this through a held reference; pool recycling
-	// replaces the pointer atomically, matching the documented "Context() is
-	// valid after Finish()" contract without needing a lock here. Taking
-	// s.mu.RLock() would self-deadlock when invoked from mocktracer.FinishSpan
-	// inside the s.context.finish() call in Span.finish().
+	// Lock-free read: s.context is a single pointer word, only reassigned
+	// during construction in spanStart. Taking s.mu.RLock() here would
+	// self-deadlock when called transitively from Span.finish() via
+	// mocktracer.FinishSpan inside s.context.finish().
 	return s.context
 }
 

@@ -7,7 +7,6 @@ package tracer
 
 import (
 	"fmt"
-	"runtime"
 	"sync"
 	"testing"
 
@@ -17,13 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSpanPoolReleaseClearsFields(t *testing.T) {
-	// Drain the pool to increase the chance of getting back the same pointer.
-	for range 100 {
-		spanPool.Get()
-	}
-	runtime.GC()
-
+func TestSpanClearZeroesFields(t *testing.T) {
 	s := newSpan("test.op", "test.svc", "/test", 1, 2, 3)
 	s.spanType = "web"
 	s.error = 1
@@ -32,39 +25,33 @@ func TestSpanPoolReleaseClearsFields(t *testing.T) {
 	s.spanLinks = []SpanLink{{TraceID: 99, SpanID: 88}}
 	s.finished = true
 
-	saved := s
-	releaseSpan(s, true)
-	got := acquireSpan(true)
-
-	if got != saved {
-		t.Skip("sync.Pool did not return the same object; non-deterministic — skipping")
-	}
+	s.clear()
 
 	// Serialized fields must be zeroed.
-	assert.Equal(t, "", got.name)
-	assert.Equal(t, "", got.service)
-	assert.Equal(t, "", got.resource)
-	assert.Equal(t, "", got.spanType)
-	assert.Equal(t, int64(0), got.start)
-	assert.Equal(t, int64(0), got.duration)
-	assert.Equal(t, uint64(0), got.spanID)
-	assert.Equal(t, uint64(0), got.traceID)
-	assert.Equal(t, uint64(0), got.parentID)
-	assert.Equal(t, int32(0), got.error)
-	assert.False(t, got.finished)
+	assert.Equal(t, "", s.name)
+	assert.Equal(t, "", s.service)
+	assert.Equal(t, "", s.resource)
+	assert.Equal(t, "", s.spanType)
+	assert.Equal(t, int64(0), s.start)
+	assert.Equal(t, int64(0), s.duration)
+	assert.Equal(t, uint64(0), s.spanID)
+	assert.Equal(t, uint64(0), s.traceID)
+	assert.Equal(t, uint64(0), s.parentID)
+	assert.Equal(t, int32(0), s.error)
+	assert.False(t, s.finished)
 
 	// Maps must be empty.
-	require.NotNil(t, got.metrics)
-	assert.True(t, got.meta.IsZero())
-	assert.Empty(t, got.metrics)
+	require.NotNil(t, s.metrics)
+	assert.True(t, s.meta.IsZero())
+	assert.Empty(t, s.metrics)
 
 	// Slices and pointer fields must be nil.
-	assert.Nil(t, got.spanLinks)
-	assert.Nil(t, got.spanEvents)
+	assert.Nil(t, s.spanLinks)
+	assert.Nil(t, s.spanEvents)
 
-	// SpanContext is intentionally NOT cleared. Context() is lock-free and
-	// external code may still read from it after Finish(). The context is
-	// replaced on reuse via newSpanContext in spanStart.
+	// s.context is intentionally NOT cleared: Context() is lock-free and
+	// external code may still read it after Finish(). spanStart reassigns
+	// it on reuse.
 }
 
 func TestSpanPoolPayloadCorrectness(t *testing.T) {

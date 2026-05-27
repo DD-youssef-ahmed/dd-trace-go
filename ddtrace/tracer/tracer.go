@@ -175,9 +175,6 @@ type tracer struct {
 	// telemetry is the telemetry client for the tracer.
 	telemetry telemetry.Client
 
-	// spanPoolEnabled controls whether acquireSpan/releaseSpan use sync.Pool.
-	spanPoolEnabled bool
-
 	// State related to the Dynamic Instrumentation product.
 	dynInstSubscriptions dynInstSubscriptions
 
@@ -579,7 +576,6 @@ func newTracer(opts ...StartOption) (*tracer, error) {
 		return nil, err
 	}
 	c := t.config
-	t.spanPoolEnabled = c.spanPoolEnabled
 	t.statsd.Incr("datadog.tracer.started", nil, 1)
 	if c.internalConfig.RuntimeMetricsEnabled() {
 		log.Debug("Runtime metrics enabled.")
@@ -716,7 +712,7 @@ func (t *tracer) worker(tick <-chan time.Time) {
 			if len(trace.spans) > 0 {
 				t.traceWriter.add(trace.spans)
 			}
-			releaseSpans(trace.spans, t.spanPoolEnabled)
+			releaseSpans(trace.spans, t.config.spanPoolEnabled)
 		case <-tick:
 			t.statsd.Incr("datadog.tracer.flush_triggered", []string{"reason:scheduled"}, 1)
 			t.traceWriter.flush()
@@ -744,7 +740,7 @@ func (t *tracer) worker(tick <-chan time.Time) {
 					if len(trace.spans) > 0 {
 						t.traceWriter.add(trace.spans)
 					}
-					releaseSpans(trace.spans, t.spanPoolEnabled)
+					releaseSpans(trace.spans, t.config.spanPoolEnabled)
 				default:
 					break loop
 				}
@@ -841,8 +837,8 @@ func spanStart(operationName string, sharedAttrs *traceinternal.SpanAttributes, 
 		pprofContext = opts.Context
 	)
 
-	// Read parent data BEFORE acquireSpan(). The pool may recycle the parent
-	// span object, so all reads through context.span must happen here.
+	// Snapshot parent fields before acquireSpan: the pool may later recycle
+	// the parent, invalidating context.span reads.
 	hasLocalParent := false
 	if opts.Parent != nil {
 		context = opts.Parent
@@ -878,10 +874,8 @@ func spanStart(operationName string, sharedAttrs *traceinternal.SpanAttributes, 
 	}
 	// span defaults
 	span := acquireSpan(poolEnabled)
-	// Hold the lock during field initialization. The pool may recycle a span
-	// that is still reachable through an old SpanContext.span pointer held by
-	// other goroutines. Locking here ensures those concurrent readers (e.g.,
-	// getResource, getSpanID) see a consistent state.
+	// A recycled span may still be reachable via an old SpanContext.span
+	// pointer; hold the lock so concurrent readers see a consistent state.
 	span.mu.Lock()
 	span.name = operationName
 	span.service = parentService // inherit from parent if available
@@ -919,9 +913,8 @@ func spanStart(operationName string, sharedAttrs *traceinternal.SpanAttributes, 
 	pprofContext, span.taskEnd = startExecutionTracerTask(pprofContext, span)
 	span.pprofCtxRestore = pprofContext
 	span.mu.Unlock()
-	// setTags acquires the span lock internally, so it must be called after
-	// the initialization lock is released. Tags may override service name
-	// (via ServiceName option), so the top-level check must happen after.
+	// setTags takes s.mu internally. Tags may override service name
+	// (ServiceName option), so the top-level check below runs after.
 	span.setTags(opts.Tags)
 	isRootSpan := context == nil || !hasLocalParent
 	span.mu.Lock()
@@ -944,15 +937,15 @@ func (t *tracer) StartSpan(operationName string, options ...StartSpanOption) *Sp
 	if !t.config.enabled.get() {
 		return nil
 	}
-	span := spanStart(operationName, &t.sharedAttrs, t.spanPoolEnabled, options...)
+	span := spanStart(operationName, &t.sharedAttrs, t.config.spanPoolEnabled, options...)
 
 	// Snapshot all internal config fields needed below under a single RLock to avoid
 	// reader-counter contention on Config.mu when many goroutines call StartSpan.
 	cSnap := t.config.internalConfig.SpanStartSnapshot()
 
-	// Hold the lock while writing fields that may be read by other
-	// goroutines holding old SpanContext.span references to this
-	// recycled span (e.g., inheritedData() reads s.service under RLock).
+	// Lock against concurrent readers holding an old SpanContext.span
+	// pointer to this (potentially recycled) span; e.g., inheritedData()
+	// takes s.mu.RLock to read s.service.
 	span.mu.Lock()
 	if span.service == "" {
 		span.service = cSnap.ServiceName
@@ -971,7 +964,6 @@ func (t *tracer) StartSpan(operationName string, options ...StartSpanOption) *Sp
 	span.supportsEvents = t.config.agent.load().spanEventsAvailable
 	span.mu.Unlock()
 
-	// setTags acquires the span lock internally.
 	span.setTags(t.config.globalTags.get())
 
 	span.mu.Lock()

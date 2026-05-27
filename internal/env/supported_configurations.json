@@ -1572,7 +1572,7 @@
       {
         "implementation": "B",
         "type": "boolean",
-        "default": "true"
+        "default": "false"
       }
     ],
     "DD_TRACE_SQL_ANALYTICS_ENABLED": [
