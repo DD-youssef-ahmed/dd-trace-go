@@ -228,10 +228,14 @@ func (s *Span) Context() *SpanContext {
 	if s == nil {
 		return nil
 	}
-	s.mu.RLock()
-	ctx := s.context
-	s.mu.RUnlock()
-	return ctx
+	// Plain read: s.context is a single pointer word and is only reassigned
+	// during span construction in spanStart (which holds s.mu). After Finish(),
+	// callers may still read this through a held reference; pool recycling
+	// replaces the pointer atomically, matching the documented "Context() is
+	// valid after Finish()" contract without needing a lock here. Taking
+	// s.mu.RLock() would self-deadlock when invoked from mocktracer.FinishSpan
+	// inside the s.context.finish() call in Span.finish().
+	return s.context
 }
 
 type inheritedData struct {
@@ -564,9 +568,9 @@ func (s *Span) Root() *Span {
 	if s == nil {
 		return nil
 	}
-	s.mu.RLock()
+	// Plain read for the same reason as Context(): avoids self-deadlock when
+	// called transitively from Span.finish() via mocktracer.FinishSpan.
 	ctx := s.context
-	s.mu.RUnlock()
 	if ctx == nil {
 		return nil
 	}
