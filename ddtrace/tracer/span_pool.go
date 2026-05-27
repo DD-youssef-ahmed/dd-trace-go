@@ -30,7 +30,10 @@ func releaseSpan(s *Span, poolEnabled bool) {
 }
 
 func releaseSpans(spans []*Span, poolEnabled bool) {
+	if !poolEnabled {
+		return
+	}
 	for _, s := range spans {
-		releaseSpan(s, poolEnabled)
+		spanPool.Put(s)
 	}
 }

@@ -344,7 +344,6 @@ func (c *SpanContext) SpanLinks() []SpanLink {
 
 // foreachBaggageItemLocked iterates over baggage items.
 // c.mu must be held for reading.
-//
 // +checklocksread:c.mu
 func (c *SpanContext) foreachBaggageItemLocked(handler func(k, v string) bool) {
 	assert.RWMutexRLocked(&c.mu)
@@ -399,7 +398,6 @@ func (c *SpanContext) SamplingPriority() (p int, ok bool) {
 
 // setBaggageItemLocked sets a baggage item.
 // c.mu must be held for writing.
-//
 // +checklocks:c.mu
 func (c *SpanContext) setBaggageItemLocked(key, val string) {
 	assert.RWMutexLocked(&c.mu)
@@ -418,7 +416,6 @@ func (c *SpanContext) setBaggageItem(key, val string) {
 
 // baggageItemLocked retrieves a baggage item.
 // c.mu must be held for reading.
-//
 // +checklocksread:c.mu
 func (c *SpanContext) baggageItemLocked(key string) string {
 	assert.RWMutexRLocked(&c.mu)
@@ -427,7 +424,6 @@ func (c *SpanContext) baggageItemLocked(key string) string {
 
 // baggageCountLocked returns the number of baggage items.
 // c.mu must be held for reading.
-//
 // +checklocksread:c.mu
 func (c *SpanContext) baggageCountLocked() int {
 	assert.RWMutexRLocked(&c.mu)

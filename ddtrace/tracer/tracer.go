@@ -1085,7 +1085,7 @@ func spanResourcePIISafe(s *Span) bool {
 func (s *Span) getResourceIfPIISafe() (resource string, safe bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.resource, s.spanType == ext.SpanTypeWeb || s.spanType == ext.AppTypeRPC || s.spanType == ""
+	return s.resource, spanResourcePIISafe(s)
 }
 
 // Stop stops the tracer.

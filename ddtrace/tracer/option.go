@@ -59,6 +59,7 @@ const (
 	envLLMObsMlApp            = "DD_LLMOBS_ML_APP"
 	envLLMObsAgentlessEnabled = "DD_LLMOBS_AGENTLESS_ENABLED"
 	envLLMObsProjectName      = "DD_LLMOBS_PROJECT_NAME"
+	envSpanPoolEnabled        = "DD_TRACE_SPAN_POOL_ENABLED"
 )
 
 var contribIntegrations = map[string]struct {
@@ -344,7 +345,7 @@ func newConfig(opts ...StartOption) (*config, error) {
 		AgentlessEnabled: llmobsAgentlessEnabledFromEnv(),
 		ProjectName:      env.Get(envLLMObsProjectName),
 	}
-	c.spanPoolEnabled = internal.BoolEnv("DD_TRACE_SPAN_POOL_ENABLED", false)
+	c.spanPoolEnabled = internal.BoolEnv(envSpanPoolEnabled, false)
 	for _, fn := range opts {
 		if fn == nil {
 			continue
