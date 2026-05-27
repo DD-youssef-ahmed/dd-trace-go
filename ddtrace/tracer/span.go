@@ -190,10 +190,12 @@ func (s *Span) clear() {
 	s.mu.Lock()
 	// s.context is intentionally not nilled: Context() may still be called
 	// after Finish(), and spanStart will reassign it on reuse.
-	// Maps are replaced (not cleared in place) so concurrent encoders keep
-	// a stable reference to the old map.
-	s.meta = traceinternal.SpanMeta{}
-	s.metrics = make(map[string]float64, 1)
+	// clear() is called after traceWriter.add() encodes the span, so in-place
+	// map clearing is safe — no concurrent encoder holds a reference.
+	s.meta.Reset()
+	for k := range s.metrics {
+		delete(s.metrics, k)
+	}
 	s.metaStruct = nil
 	s.name = ""
 	s.service = ""

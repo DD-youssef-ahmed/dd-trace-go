@@ -273,7 +273,8 @@ func BenchmarkSpanPoolRelease(b *testing.B) {
 	// runN iterations, forcing ring-buffer rebuild with varying b.N).
 	s := acquireSpan(true)
 	for b.Loop() {
-		releaseSpan(s, true)
+		s.clear()
+		spanPool.Put(s)
 		s = acquireSpan(true)
 	}
 }

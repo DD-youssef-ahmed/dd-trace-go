@@ -70,6 +70,22 @@ func (sm *SpanMeta) ReplaceSharedAttrs(prev, next *SpanAttributes) {
 	}
 }
 
+// Reset clears m in place (preserving its allocation) and nils promotedAttrs.
+// Called at span release time to avoid reallocating the flat map on reuse.
+func (sm *SpanMeta) Reset() {
+	for k := range sm.m {
+		delete(sm.m, k)
+	}
+	sm.promotedAttrs = nil
+}
+
+// InitWithAttrs sets promotedAttrs without replacing the SpanMeta or touching m.
+// For pooled spans where m was already cleared by Reset; equivalent to NewSpanMeta
+// when m is nil (fresh span).
+func (sm *SpanMeta) InitWithAttrs(attrs *SpanAttributes) {
+	sm.promotedAttrs = attrs
+}
+
 // Normalize sets m and attrs to nil when they are empty so that a zero-length
 // SpanMeta compares equal to a freshly-zeroed one. Intended for test helpers.
 func (sm *SpanMeta) Normalize() {

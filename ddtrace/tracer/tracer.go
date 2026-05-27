@@ -712,7 +712,9 @@ func (t *tracer) worker(tick <-chan time.Time) {
 			if len(trace.spans) > 0 {
 				t.traceWriter.add(trace.spans)
 			}
-			releaseSpans(trace.spans, t.config.spanPoolEnabled)
+			if t.config.spanPoolEnabled {
+				releaseSpans(trace.spans)
+			}
 		case <-tick:
 			t.statsd.Incr("datadog.tracer.flush_triggered", []string{"reason:scheduled"}, 1)
 			t.traceWriter.flush()
@@ -740,7 +742,9 @@ func (t *tracer) worker(tick <-chan time.Time) {
 					if len(trace.spans) > 0 {
 						t.traceWriter.add(trace.spans)
 					}
-					releaseSpans(trace.spans, t.config.spanPoolEnabled)
+					if t.config.spanPoolEnabled {
+						releaseSpans(trace.spans)
+					}
 				default:
 					break loop
 				}
@@ -885,7 +889,7 @@ func spanStart(operationName string, sharedAttrs *traceinternal.SpanAttributes, 
 	span.traceID = id
 	span.start = startTime
 	span.integration = "manual"
-	span.meta = traceinternal.NewSpanMeta(sharedAttrs) // COW: shared until a per-span field is set
+	span.meta.InitWithAttrs(sharedAttrs) // COW: shared until a per-span field is set
 
 	span.spanLinks = append(span.spanLinks, opts.SpanLinks...)
 

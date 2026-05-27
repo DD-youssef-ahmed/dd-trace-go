@@ -13,27 +13,16 @@ var spanPool = sync.Pool{
 
 func acquireSpan(poolEnabled bool) *Span {
 	if poolEnabled {
-		s := spanPool.Get().(*Span)
-		s.clear()
-		return s
+		return spanPool.Get().(*Span)
 	}
 	return &Span{
 		metrics: make(map[string]float64, 1),
 	}
 }
 
-func releaseSpan(s *Span, poolEnabled bool) {
-	if !poolEnabled {
-		return
-	}
-	spanPool.Put(s)
-}
-
-func releaseSpans(spans []*Span, poolEnabled bool) {
-	if !poolEnabled {
-		return
-	}
+func releaseSpans(spans []*Span) {
 	for _, s := range spans {
+		s.clear()
 		spanPool.Put(s)
 	}
 }
