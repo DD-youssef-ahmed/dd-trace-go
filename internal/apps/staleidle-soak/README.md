@@ -59,9 +59,9 @@ with the customer's exact transport (UDS) under stress and over time.
 # from internal/apps/staleidle-soak/
 
 # B.1 + B.2 + B.3 against the current worktree's tracer
-./soak.sh B.1 patched
-./soak.sh B.2 patched
-./soak.sh B.3 patched
+bash soak.sh B.1 patched
+bash soak.sh B.2 patched
+bash soak.sh B.3 patched
 
 # Results land in ./results/<scenario>_<label>.json
 jq . results/B.2_patched.json
@@ -74,9 +74,9 @@ git worktree add -f /tmp/baseline-worktree 633e55f821fc45d2d6a866a4c1961d831da19
 cp -r internal/apps/staleidle-soak /tmp/baseline-worktree/internal/apps/
 
 cd /tmp/baseline-worktree/internal/apps/staleidle-soak
-./soak.sh B.1 baseline
-./soak.sh B.2 baseline
-./soak.sh B.3 baseline
+bash soak.sh B.1 baseline
+bash soak.sh B.2 baseline
+bash soak.sh B.3 baseline
 
 # Diff
 diff <(jq -S '{spans_created, flush_traces, traces_dropped, api_errors, lost_trace_log_count, send_stats_err_log_count}' /tmp/baseline-worktree/internal/apps/staleidle-soak/results/B.2_baseline.json) \
