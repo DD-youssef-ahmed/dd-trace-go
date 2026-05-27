@@ -25,17 +25,18 @@ const (
 )
 
 // InstallGlobal creates a DD-configured MeterProvider and sets it as the global OTel meter provider.
-// Call this before tracer.Start() to enable the full DD OTLP metrics pipeline.
-// Note: this replaces any previously installed global MeterProvider.
+// It is safe to call unconditionally: it is a no-op when DD_METRICS_OTEL_ENABLED is unset/false,
+// and it will not replace a non-noop MeterProvider already installed by the caller.
 //
-// If DD_METRICS_OTEL_ENABLED is unset or false, this function is a no-op and does not
-// modify the global MeterProvider. This makes it safe to call unconditionally (e.g. from
-// Orchestrion-injected code) without clobbering a customer-installed provider.
+// tracer.Start() calls this automatically when DD_METRICS_OTEL_ENABLED=true, so most users
+// do not need to call it directly. Call it explicitly only if you need to customise the
+// provider (e.g. pass additional options) before tracer.Start() runs.
 func InstallGlobal(opts ...Option) error {
-	// Short-circuit when metrics are disabled: do not touch the global MeterProvider.
-	// This prevents Orchestrion-injected calls from replacing a customer-installed
-	// provider with a noop when the feature is turned off.
 	if !isMetricsEnabled() {
+		return nil
+	}
+	// Don't replace a real SDK MeterProvider that the user already installed.
+	if !isNoop(otel.GetMeterProvider()) {
 		return nil
 	}
 	allOpts := append([]Option{withRuntimeProducerDefault()}, opts...)

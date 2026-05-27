@@ -9,6 +9,7 @@ import (
 	"context"
 	goruntime "runtime/metrics"
 
+	ddmetric "github.com/DataDog/dd-trace-go/v2/ddtrace/opentelemetry/metric"
 	"github.com/DataDog/dd-trace-go/v2/internal/version"
 
 	"go.opentelemetry.io/otel"
@@ -25,6 +26,15 @@ const otelRuntimeMetricsInstrumentationScope = "go.runtime"
 type otelRuntimeMetrics struct{}
 
 func startOtelRuntimeMetrics(ctx context.Context) (*otelRuntimeMetrics, error) {
+	// Auto-install the DD OTLP MeterProvider if none has been set yet.
+	// This ensures env-var-only activation (DD_METRICS_OTEL_ENABLED=true) works
+	// without requiring an explicit metric.InstallGlobal() call, consistent with
+	// how AppSec, DataStreams, and other tracer features activate from env vars.
+	// InstallGlobal is a no-op if a real SDK provider is already installed.
+	if err := ddmetric.InstallGlobal(); err != nil {
+		return nil, err
+	}
+
 	meter := otel.GetMeterProvider().Meter(
 		otelRuntimeMetricsInstrumentationScope,
 		otelmetric.WithInstrumentationVersion(version.Tag),

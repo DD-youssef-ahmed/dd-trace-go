@@ -283,7 +283,7 @@ func Start(opts ...StartOption) error {
 		}
 	}
 
-	if t.config.internalConfig.OtelRuntimeMetricsEnabled() && t.config.internalConfig.RuntimeMetricsEnabled() {
+	if t.config.internalConfig.OtelRuntimeMetricsEnabled() {
 		if t.otelRuntimeMetrics, err = startOtelRuntimeMetrics(gocontext.Background()); err != nil {
 			log.Warn("Failed to start OTel runtime metrics: %v", err.Error())
 		} else if t.otelRuntimeMetrics != nil {

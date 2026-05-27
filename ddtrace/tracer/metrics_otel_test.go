@@ -44,9 +44,9 @@ func metricsByName(t *testing.T, reader *sdkmetric.ManualReader) map[string]metr
 }
 
 func TestOtelRuntimeMetricsStartNoopProvider(t *testing.T) {
-	// With no global provider set, the global is the noop provider.
-	// startOtelRuntimeMetrics should succeed and return non-nil — metrics are
-	// silently discarded by the noop meter at near-zero cost.
+	// With no global provider set and DD_METRICS_OTEL_ENABLED unset,
+	// InstallGlobal is a no-op so the global stays noop.
+	// startOtelRuntimeMetrics must still succeed (metrics are silently discarded).
 	o, err := startOtelRuntimeMetrics(context.Background())
 	require.NoError(t, err)
 	assert.NotNil(t, o)
