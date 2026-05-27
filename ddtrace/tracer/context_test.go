@@ -9,11 +9,14 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"sync"
 	"testing"
 
 	"github.com/DataDog/dd-trace-go/v2/internal"
+	"github.com/DataDog/dd-trace-go/v2/internal/orchestrion"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestContextWithSpan(t *testing.T) {
@@ -208,4 +211,124 @@ func TestStartSpanFromNilContext(t *testing.T) {
 	ctxSpan, ok := SpanFromContext(ctx)
 	assert.True(ok)
 	assert.Equal(child, ctxSpan)
+}
+
+// TestFinishIsIdempotentOnGLS is a regression test for
+// https://github.com/DataDog/orchestrion/issues/782 (korECM's report).
+//
+// Before the fix, Span.Finish unconditionally popped ActiveSpanKey from the
+// GLS context stack even when s.finish(t) short-circuited because s.finished
+// was already true. Calling Finish twice on the same span popped the stack
+// twice — and the second pop removed an unrelated parent span sitting on
+// top, causing cross-request trace parenting bugs in production.
+//
+// This test pushes outer + inner onto the GLS stack via StartSpanFromContext
+// (which calls ContextWithSpan), finishes inner twice, and verifies that
+// outer is still reachable from a bare context (i.e., still on the GLS
+// stack). On main this fails: the second inner.Finish() pops outer.
+func TestFinishIsIdempotentOnGLS(t *testing.T) {
+	t.Cleanup(orchestrion.MockGLS())
+
+	_, _, _, stop, err := startTestTracer(t)
+	require.NoError(t, err)
+	defer stop()
+
+	outer, outerCtx := StartSpanFromContext(context.Background(), "outer")
+	inner, _ := StartSpanFromContext(outerCtx, "inner")
+
+	// Sanity: both pushes occurred. ActiveSpanKey gets one entry per span.
+	require.Equal(t, 2, orchestrion.GLSStackDepth(), "expected outer+inner on GLS stack")
+
+	inner.Finish() // expected: pop inner, stack = [outer]
+	inner.Finish() // expected: no-op (idempotent). Before fix: pops outer.
+
+	// outer must still be the active span via GLS lookup against a bare ctx.
+	top, ok := SpanFromContext(orchestrion.WrapContext(context.Background()))
+	assert.True(t, ok, "outer should still be on the GLS stack")
+	assert.Equal(t, outer, top, "double inner.Finish() must not pop outer")
+
+	// And the stack must have exactly one entry (outer).
+	assert.Equal(t, 1, orchestrion.GLSStackDepth(), "stack should have only outer")
+
+	outer.Finish() // clean up
+
+	assert.Equal(t, 0, orchestrion.GLSStackDepth(), "stack should be empty after outer.Finish")
+}
+
+// TestFinishOnDifferentGoroutineDoesNotPopOthersStack is a regression test
+// for the cross-goroutine pop bug also surfaced in
+// https://github.com/DataDog/orchestrion/issues/782. Before the fix,
+// Span.Finish used the raw orchestrion.GLSPopValue, which pops whichever
+// goroutine's GLS stack the finisher happens to be running on. If goroutine
+// A starts a span and hands it to goroutine B for Finish, B's own GLS stack
+// gets corrupted (an entry belonging to a different in-flight span gets
+// popped instead).
+//
+// With the fix in place, the popFunc captured at push time is scoped to the
+// pushing goroutine, so Finish on a different goroutine is a no-op for the
+// finishing goroutine's stack.
+func TestFinishOnDifferentGoroutineDoesNotPopOthersStack(t *testing.T) {
+	t.Cleanup(orchestrion.MockGLSPerGoroutine())
+
+	_, _, _, stop, err := startTestTracer(t)
+	require.NoError(t, err)
+	defer stop()
+
+	// Goroutine A: starts spanA, pushing it onto A's GLS.
+	spanA, _ := StartSpanFromContext(context.Background(), "spanA")
+	require.Equal(t, 1, orchestrion.GLSStackDepth(), "spanA should be on A's stack")
+
+	// Hand spanA to goroutine B and have B start its own spanB and then
+	// Finish spanA from B. The finish on B must not pop spanB off B's stack.
+	var wg sync.WaitGroup
+	var depthInB int
+	var topOnB *Span
+	var topOnBOk bool
+	wg.Go(func() {
+		spanB, _ := StartSpanFromContext(context.Background(), "spanB")
+		// Now B's GLS has [spanB]. Finishing spanA on this goroutine must
+		// be a no-op for B's stack.
+		spanA.Finish()
+
+		// B's stack should still contain spanB.
+		depthInB = orchestrion.GLSStackDepth()
+		topOnB, topOnBOk = SpanFromContext(orchestrion.WrapContext(context.Background()))
+		spanB.Finish()
+	})
+	wg.Wait()
+
+	assert.Equal(t, 1, depthInB, "spanA.Finish on goroutine B must not pop B's stack")
+	assert.True(t, topOnBOk, "spanB should still be on B's stack after spanA.Finish")
+	if assert.NotNil(t, topOnB) {
+		assert.Equal(t, "spanB", topOnB.name)
+	}
+}
+
+// TestFinishWithoutContextDoesNotPopGLS verifies that a span created via
+// StartSpan (without an associated context push) does not pop the GLS stack
+// at Finish. Before the fix, Span.Finish always popped, even when no push
+// had occurred, which could corrupt unrelated GLS state.
+func TestFinishWithoutContextDoesNotPopGLS(t *testing.T) {
+	t.Cleanup(orchestrion.MockGLS())
+
+	_, _, _, stop, err := startTestTracer(t)
+	require.NoError(t, err)
+	defer stop()
+
+	// Put an unrelated span on the GLS stack via ContextWithSpan.
+	other, _ := StartSpanFromContext(context.Background(), "other")
+	require.Equal(t, 1, orchestrion.GLSStackDepth())
+
+	// Create a span the "manual" way — no ContextWithSpan, so no GLS push.
+	manual := StartSpan("manual")
+	manual.Finish()
+
+	// other must still be on the GLS stack.
+	assert.Equal(t, 1, orchestrion.GLSStackDepth(), "StartSpan().Finish() must not pop unrelated GLS entries")
+	top, ok := SpanFromContext(orchestrion.WrapContext(context.Background()))
+	assert.True(t, ok)
+	assert.Equal(t, other, top)
+
+	other.Finish()
+	assert.Equal(t, 0, orchestrion.GLSStackDepth())
 }

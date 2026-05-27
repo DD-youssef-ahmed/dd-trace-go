@@ -23,6 +23,16 @@ func ContextWithSpan(ctx context.Context, s *Span) context.Context {
 		ctx = context.Background()
 	}
 	newCtx := orchestrion.CtxWithValue(ctx, internal.ActiveSpanKey, s)
+	// Capture a goroutine-scoped popper for the ActiveSpanKey entry that
+	// CtxWithValue just pushed onto the GLS stack. We attach it to the span
+	// so that Span.Finish can release the slot exactly once, on the same
+	// goroutine that pushed it. Without this, a double Finish (or a Finish
+	// on a goroutine other than the one that pushed) would pop unrelated
+	// entries off the GLS stack — corrupting trace parenting and leaking
+	// memory at high RPS. See https://github.com/DataDog/orchestrion/issues/782.
+	if s != nil && orchestrion.Enabled() {
+		s.setGLSPopOnce(orchestrion.GLSPopFunc(internal.ActiveSpanKey))
+	}
 	return contextWithPropagatedLLMSpan(newCtx, s)
 }
 
