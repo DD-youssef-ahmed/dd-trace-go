@@ -35,8 +35,11 @@ func InstallGlobal(opts ...Option) error {
 	if !isMetricsEnabled() {
 		return nil
 	}
-	// Don't replace a real SDK MeterProvider that the user already installed.
-	if !isNoop(otel.GetMeterProvider()) {
+	// Don't replace a real OTel SDK MeterProvider that the user already installed.
+	// The OTel global defaults to an internal delegating *meterProvider (not a real
+	// SDK — it silently drops metrics until a real provider is set). We only skip
+	// installation if a real *metric.MeterProvider is already configured.
+	if _, ok := otel.GetMeterProvider().(*metric.MeterProvider); ok {
 		return nil
 	}
 	allOpts := append([]Option{withRuntimeProducerDefault()}, opts...)
