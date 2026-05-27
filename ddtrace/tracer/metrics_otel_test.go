@@ -14,6 +14,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	otelmetric "go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/metric/noop"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
@@ -55,7 +56,7 @@ func TestOtelRuntimeMetricsStartNoopProvider(t *testing.T) {
 func TestOtelRuntimeMetricsStartWithSDKProvider(t *testing.T) {
 	mp, _ := newTestMeterProvider()
 	otel.SetMeterProvider(mp)
-	defer otel.SetMeterProvider(nil)
+	defer otel.SetMeterProvider(noop.NewMeterProvider())
 
 	o, err := startOtelRuntimeMetrics(context.Background())
 	require.NoError(t, err)
