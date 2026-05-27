@@ -876,7 +876,12 @@ func spanStart(operationName string, sharedAttrs *traceinternal.SpanAttributes, 
 	span := acquireSpan(poolEnabled)
 	// A recycled span may still be reachable via an old SpanContext.span
 	// pointer; hold the lock so concurrent readers see a consistent state.
-	span.mu.Lock()
+	// For pool-disabled spans nothing else can observe the new allocation
+	// during construction, so we skip the lock to avoid the per-StartSpan
+	// overhead it would otherwise add.
+	if poolEnabled {
+		span.mu.Lock()
+	}
 	span.name = operationName
 	span.service = parentService // inherit from parent if available
 	span.serviceSource = parentServiceSource
@@ -912,19 +917,25 @@ func spanStart(operationName string, sharedAttrs *traceinternal.SpanAttributes, 
 	span.setMetaInit("language", "go")
 	pprofContext, span.taskEnd = startExecutionTracerTask(pprofContext, span)
 	span.pprofCtxRestore = pprofContext
-	span.mu.Unlock()
+	if poolEnabled {
+		span.mu.Unlock()
+	}
 	// setTags takes s.mu internally. Tags may override service name
 	// (ServiceName option), so the top-level check below runs after.
 	span.setTags(opts.Tags)
 	isRootSpan := context == nil || context.span == nil
-	span.mu.Lock()
+	if poolEnabled {
+		span.mu.Lock()
+	}
 	if isRootSpan || parentService != span.service {
 		// The span is the local root span.
 		span.setMetricInit(keyTopLevel, 1)
 		// all top level spans are measured. So the measured tag is redundant.
 		delete(span.metrics, keyMeasured)
 	}
-	span.mu.Unlock()
+	if poolEnabled {
+		span.mu.Unlock()
+	}
 	if isRootSpan {
 		traceprof.SetProfilerRootTags(span)
 	}
@@ -937,7 +948,8 @@ func (t *tracer) StartSpan(operationName string, options ...StartSpanOption) *Sp
 	if !t.config.enabled.get() {
 		return nil
 	}
-	span := spanStart(operationName, &t.sharedAttrs, t.config.spanPoolEnabled, options...)
+	poolEnabled := t.config.spanPoolEnabled
+	span := spanStart(operationName, &t.sharedAttrs, poolEnabled, options...)
 
 	// Snapshot all internal config fields needed below under a single RLock to avoid
 	// reader-counter contention on Config.mu when many goroutines call StartSpan.
@@ -945,8 +957,11 @@ func (t *tracer) StartSpan(operationName string, options ...StartSpanOption) *Sp
 
 	// Lock against concurrent readers holding an old SpanContext.span
 	// pointer to this (potentially recycled) span; e.g., inheritedData()
-	// takes s.mu.RLock to read s.service.
-	span.mu.Lock()
+	// takes s.mu.RLock to read s.service. Skipped on the pool-disabled path
+	// where the span is freshly allocated and cannot be observed elsewhere.
+	if poolEnabled {
+		span.mu.Lock()
+	}
 	if span.service == "" {
 		span.service = cSnap.ServiceName
 	}
@@ -962,11 +977,15 @@ func (t *tracer) StartSpan(operationName string, options ...StartSpanOption) *Sp
 		span.setMetaInit(keyHostname, cSnap.Hostname)
 	}
 	span.supportsEvents = t.config.agent.load().spanEventsAvailable
-	span.mu.Unlock()
+	if poolEnabled {
+		span.mu.Unlock()
+	}
 
 	span.setTags(t.config.globalTags.get())
 
-	span.mu.Lock()
+	if poolEnabled {
+		span.mu.Lock()
+	}
 	if newSvc, ok := t.config.internalConfig.ServiceMapping(span.service); ok {
 		span.service = newSvc
 		span.serviceSource = ext.ServiceSourceMapping
@@ -982,7 +1001,9 @@ func (t *tracer) StartSpan(operationName string, options ...StartSpanOption) *Sp
 		delete(span.metrics, ext.Environment)
 		span.meta.Set(ext.Environment, cSnap.Env)
 	}
-	span.mu.Unlock()
+	if poolEnabled {
+		span.mu.Unlock()
+	}
 
 	if _, ok := span.context.SamplingPriority(); !ok {
 		// if not already sampled or a brand new trace, sample it
@@ -995,10 +1016,12 @@ func (t *tracer) StartSpan(operationName string, options ...StartSpanOption) *Sp
 	}
 	if cSnap.ProfilerHotspotsEnabled || cSnap.ProfilerEndpoints {
 		t.applyPPROFLabels(span.pprofCtxRestore, span, cSnap)
-	} else {
+	} else if poolEnabled {
 		span.mu.Lock()
 		span.pprofCtxRestore = nil
 		span.mu.Unlock()
+	} else {
+		span.pprofCtxRestore = nil
 	}
 	if cSnap.DebugAbandonedSpans {
 		select {
@@ -1008,13 +1031,17 @@ func (t *tracer) StartSpan(operationName string, options ...StartSpanOption) *Sp
 			log.Error("Abandoned spans channel full, disregarding span.")
 		}
 	}
-	span.mu.Lock()
+	if poolEnabled {
+		span.mu.Lock()
+	}
 	if span.metrics[keyTopLevel] == 1 {
 		// The span is the local root span.
 		span.setMetricInit(keySpanAttributeSchemaVersion, float64(t.config.internalConfig.SpanAttributeSchemaVersion()))
 	}
 	span.setMetricInit(ext.Pid, float64(t.pid))
-	span.mu.Unlock()
+	if poolEnabled {
+		span.mu.Unlock()
+	}
 	t.spansStarted.Inc(span.integration)
 
 	return span
@@ -1053,10 +1080,15 @@ func (t *tracer) applyPPROFLabels(ctx gocontext.Context, span *Span, snap intern
 	}
 	if len(labels) > 0 {
 		pprofActive := pprof.WithLabels(ctx, pprof.Labels(labels...))
-		span.mu.Lock()
-		span.pprofCtxRestore = ctx
-		span.pprofCtxActive = pprofActive
-		span.mu.Unlock()
+		if t.config.spanPoolEnabled {
+			span.mu.Lock()
+			span.pprofCtxRestore = ctx
+			span.pprofCtxActive = pprofActive
+			span.mu.Unlock()
+		} else {
+			span.pprofCtxRestore = ctx
+			span.pprofCtxActive = pprofActive
+		}
 		pprof.SetGoroutineLabels(pprofActive)
 	}
 }
