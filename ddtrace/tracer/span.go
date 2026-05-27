@@ -238,14 +238,41 @@ type inheritedData struct {
 	pprofCtx      context.Context
 }
 
-func (s *Span) inheritedData() inheritedData {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+// +checklocksignore — Called either with s.mu held or during initialization before sharing.
+func (s *Span) inheritedDataLocked() inheritedData {
 	return inheritedData{
 		service:       s.service,
 		serviceSource: s.serviceSource,
 		pprofCtx:      s.pprofCtxActive,
 	}
+}
+
+// +checklocksignore — Called either with s.mu held or during initialization before sharing.
+func (s *Span) syncContextInheritedLocked() {
+	if s.context != nil {
+		s.context.setInheritedData(s.inheritedDataLocked())
+	}
+}
+
+func (s *Span) syncContextSQLCommentValue(key, value string) {
+	if s.context != nil {
+		s.context.setSQLCommentValue(key, value)
+	}
+}
+
+// +checklocksignore — Called either with s.mu held or during initialization before sharing.
+func (s *Span) sqlCommentDataLocked() sqlCommentData {
+	data := sqlCommentData{}
+	if v, ok := s.meta.Get(ext.Environment); ok {
+		data.env = v
+	}
+	if v, ok := s.meta.Get(ext.Version); ok {
+		data.version = v
+	}
+	if v, ok := s.meta.Get(ext.PeerService); ok {
+		data.peerService = v
+	}
+	return data
 }
 
 // getSpanID concurrency safe reads the spanID field.
@@ -461,6 +488,7 @@ func (s *Span) setTagLocked(key string, value any) {
 		if so, ok := value.(sharedinternal.ServiceOverride); ok {
 			s.service = so.Name
 			s.serviceSource = so.Source
+			s.syncContextInheritedLocked()
 			return
 		}
 	}
@@ -477,6 +505,7 @@ func (s *Span) setTagLocked(key string, value any) {
 			// stay as the original parent span context regardless
 			// of what we change at a lower level.
 			s.pprofCtxActive = pprof.WithLabels(s.pprofCtxActive, pprof.Labels(traceprof.TraceEndpoint, v))
+			s.syncContextInheritedLocked()
 			pprof.SetGoroutineLabels(s.pprofCtxActive)
 		}
 		s.setMetaLocked(key, v)
@@ -780,12 +809,17 @@ func (s *Span) setMetaInit(key, v string) {
 	case ext.ServiceName:
 		s.service = v
 		s.serviceSource = serviceSourceManual
+		s.syncContextInheritedLocked()
 	case ext.ResourceName:
 		s.resource = v
 	case ext.SpanType:
 		s.spanType = v
 	default:
 		s.meta.Set(key, v)
+	}
+	switch key {
+	case ext.Environment, ext.Version, ext.PeerService:
+		s.syncContextSQLCommentValue(key, v)
 	}
 }
 
@@ -835,6 +869,10 @@ func (s *Span) setMetricInit(key string, v float64) {
 		s.metrics = make(map[string]float64, 1)
 	}
 	s.meta.Delete(key)
+	switch key {
+	case ext.Environment, ext.Version, ext.PeerService:
+		s.syncContextSQLCommentValue(key, "")
+	}
 	// Note: We don't handle ManualKeep or _sampling_priority_v1shim during init
 	// because those require modifying trace-level state which needs locking
 	s.metrics[key] = v
@@ -855,6 +893,10 @@ func (s *Span) setMetricLocked(key string, v float64) {
 		s.metrics = make(map[string]float64, 1)
 	}
 	s.meta.Delete(key)
+	switch key {
+	case ext.Environment, ext.Version, ext.PeerService:
+		s.syncContextSQLCommentValue(key, "")
+	}
 	switch key {
 	case ext.ManualKeep:
 		if v == float64(samplernames.AppSec) {
@@ -1069,7 +1111,7 @@ func (s *Span) finish(finishTime int64) {
 	// Call context.finish() which handles trace-level bookkeeping and may modify
 	// this span (to set trace-level tags).
 	// Lock ordering is span.mu -> trace.mu.
-	s.context.finish()
+	s.context.finish(s)
 
 	// compute stats after finishing the span. This ensures any normalization or tag propagation has been applied
 	if hasTracer {

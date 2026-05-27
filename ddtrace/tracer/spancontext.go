@@ -117,7 +117,6 @@ type SpanContext struct {
 	// the below group should propagate only locally
 
 	trace  *trace       // reference to the trace that this span belongs too
-	span   *Span        // reference to the span that hosts this context
 	errors atomic.Int32 // number of spans with errors in this trace
 
 	// The 16-character hex string of the last seen Datadog Span ID
@@ -130,6 +129,7 @@ type SpanContext struct {
 	// propagated this context, but didn't send any spans to Datadog.
 	reparentID string
 	isRemote   bool
+	local      bool
 
 	// the below group should propagate cross-process
 
@@ -140,6 +140,10 @@ type SpanContext struct {
 	mu locking.RWMutex
 	// +checklocks:mu
 	baggage map[string]string
+	// +checklocks:mu
+	inherited inheritedData
+	// +checklocks:mu
+	sqlComment sqlCommentData
 	// atomic int for quick checking presence of baggage. 0 indicates no baggage, otherwise baggage exists.
 	hasBaggage uint32 // +checkatomic
 	// e.g. "synthetics"
@@ -152,6 +156,12 @@ type SpanContext struct {
 	// when true, indicates this context only propagates baggage items and should not be used for distributed tracing fields
 	// +checklocks:mu
 	baggageOnly bool
+}
+
+type sqlCommentData struct {
+	env         string
+	version     string
+	peerService string
 }
 
 // Private interface for span contexts that can propagate sampling decisions.
@@ -254,7 +264,7 @@ func FromGenericCtx(c ddtrace.SpanContext) *SpanContext {
 func newSpanContext(span *Span, parent *SpanContext) *SpanContext {
 	context := &SpanContext{
 		spanID: span.spanID,
-		span:   span,
+		local:  true,
 	}
 
 	context.traceID.SetLower(span.traceID)
@@ -288,11 +298,56 @@ func newSpanContext(span *Span, parent *SpanContext) *SpanContext {
 	}
 	// put span in context's trace
 	context.trace.push(span)
+	context.inherited = span.inheritedDataLocked()
+	context.sqlComment = span.sqlCommentDataLocked()
 	// setting context.updated to false here is necessary to distinguish
 	// between initializing properties of the span (priority)
 	// and updating them after extracting context through propagators
 	context.updated = false
 	return context
+}
+
+func (c *SpanContext) inheritedData() inheritedData {
+	if c == nil {
+		return inheritedData{}
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.inherited
+}
+
+func (c *SpanContext) sqlCommentData() sqlCommentData {
+	if c == nil {
+		return sqlCommentData{}
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.sqlComment
+}
+
+func (c *SpanContext) setInheritedData(data inheritedData) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.inherited = data
+}
+
+func (c *SpanContext) setSQLCommentValue(key, value string) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	switch key {
+	case ext.Environment:
+		c.sqlComment.env = value
+	case ext.Version:
+		c.sqlComment.version = value
+	case ext.PeerService:
+		c.sqlComment.peerService = value
+	}
 }
 
 // SpanID implements ddtrace.SpanContext.
@@ -441,8 +496,8 @@ func (c *SpanContext) baggageItem(key string) string {
 
 // finish marks this span as finished in the trace.
 // The span must be locked by the caller.
-func (c *SpanContext) finish() {
-	c.trace.finishedOneLocked(c.span)
+func (c *SpanContext) finish(s *Span) {
+	c.trace.finishedOneLocked(s)
 }
 
 // safeDebugString returns a safe string representation of the SpanContext for debug logging.

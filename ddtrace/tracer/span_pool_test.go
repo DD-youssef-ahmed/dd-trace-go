@@ -272,6 +272,33 @@ func TestSpanPoolSpanTypeAndErrorReset(t *testing.T) {
 	assert.Equal(t, int32(1), sC.error)
 }
 
+func TestSpanPoolContextSnapshotsInheritedData(t *testing.T) {
+	tracer, transport, flush, stop, err := startTestTracer(t, WithSpanPool(true))
+	require.NoError(t, err)
+	defer stop()
+
+	parent := tracer.StartSpan("parent", ServiceName("parent-initial"))
+	parentCtx := parent.Context()
+	parent.SetTag(ext.ServiceName, "parent-updated")
+	parent.Finish()
+	flush(1)
+	transport.Traces() // drain and release parent to the span pool
+
+	// Start another span after the parent was released so the pool may reuse and
+	// mutate the same *Span object that used to back parentCtx.
+	polluter := tracer.StartSpan("polluter", ServiceName("polluter-service"))
+	polluter.Finish()
+	flush(1)
+	transport.Traces()
+
+	child := tracer.StartSpan("child", ChildOf(parentCtx))
+	require.NotNil(t, child)
+	defer child.Finish()
+
+	assert.Equal(t, "parent-updated", child.service)
+	assert.Equal(t, serviceSourceManual, child.serviceSource)
+}
+
 func BenchmarkSpanPoolRelease(b *testing.B) {
 	// Cycle one span at a time: release → acquire keeps the pool at 0-1
 	// items, avoiding sync.Pool internal ring-buffer growth allocations

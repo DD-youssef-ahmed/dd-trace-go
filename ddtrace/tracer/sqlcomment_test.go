@@ -240,6 +240,42 @@ func TestSQLCommentCarrierInjectNilSpan(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestSQLCommentCarrierUsesContextSnapshotAfterSpanPoolRelease(t *testing.T) {
+	tracer, transport, flush, stop, err := startTestTracer(t, WithSpanPool(true))
+	require.NoError(t, err)
+	defer stop()
+
+	parent := tracer.StartSpan("parent")
+	parentCtx := parent.Context()
+	parent.SetTag(ext.Environment, "parent-env")
+	parent.SetTag(ext.Version, "parent-version")
+	parent.SetTag(ext.PeerService, "parent-peer")
+	parent.Finish()
+	flush(1)
+	transport.Traces()
+
+	polluter := tracer.StartSpan("polluter")
+	polluter.SetTag(ext.Environment, "polluter-env")
+	polluter.SetTag(ext.Version, "polluter-version")
+	polluter.SetTag(ext.PeerService, "polluter-peer")
+	polluter.Finish()
+	flush(1)
+	transport.Traces()
+
+	carrier := SQLCommentCarrier{
+		Query:         "SELECT * from FOO",
+		Mode:          DBMPropagationModeService,
+		DBServiceName: "db-service",
+	}
+	err = carrier.Inject(parentCtx)
+	require.NoError(t, err)
+
+	assert.Contains(t, carrier.Query, "dde='parent-env'")
+	assert.Contains(t, carrier.Query, "ddpv='parent-version'")
+	assert.Contains(t, carrier.Query, "ddprs='parent-peer'")
+	assert.NotContains(t, carrier.Query, "polluter")
+}
+
 func TestExtractOpenTelemetryTraceInformation(t *testing.T) {
 	// open-telemetry supports 128 bit trace ids
 	traceID := "5bd66ef5095369c7b0d1f8f4bd33716a"
