@@ -557,9 +557,7 @@ func TestUDSTransportRecoversFromStaleIdleConn(t *testing.T) {
 			firstErr atomic.Value // error
 		)
 		for range numGoroutines {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				for range requestsEach {
 					p, err := encode(getTestTrace(1, 1))
 					if err != nil {
@@ -576,7 +574,7 @@ func TestUDSTransportRecoversFromStaleIdleConn(t *testing.T) {
 					io.Copy(io.Discard, body)
 					body.Close()
 				}
-			}()
+			})
 		}
 		wg.Wait()
 		if n := errs.Load(); n > 0 {
@@ -592,16 +590,14 @@ func TestUDSTransportRecoversFromStaleIdleConn(t *testing.T) {
 			firstErr atomic.Value // error
 		)
 		for range numGoroutines {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				for range requestsEach {
 					if err := transport.sendStats(&pb.ClientStatsPayload{}, 1); err != nil {
 						errs.Add(1)
 						firstErr.CompareAndSwap(nil, err)
 					}
 				}
-			}()
+			})
 		}
 		wg.Wait()
 		if n := errs.Load(); n > 0 {

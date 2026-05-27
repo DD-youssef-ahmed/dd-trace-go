@@ -265,7 +265,7 @@ const staleConnRetryAttempts = 2
 // on the narrow set of errors that signal a connection torn down by the peer.
 func (t *httpTransport) doWithStaleConnRetry(req *http.Request) (*http.Response, error) {
 	resp, err := t.client.Do(req)
-	for attempt := 0; attempt < staleConnRetryAttempts; attempt++ {
+	for range staleConnRetryAttempts {
 		if err == nil || !isTransientConnError(err) || req.GetBody == nil {
 			return resp, err
 		}
@@ -288,10 +288,28 @@ func (t *httpTransport) doWithStaleConnRetry(req *http.Request) (*http.Response,
 // is also included: stdlib calls Close() on a broken persistConn before the
 // error reaches the caller, so a concurrent writer racing against that close
 // may see "use of closed network connection" instead of the underlying EPIPE.
+//
+// We do both syscall.Errno identity matching (the canonical path) and a
+// cross-platform string fallback because Windows wraps WSA errors in a
+// chain that errors.Is doesn't always unwrap to syscall.Errno cleanly. The
+// string check is narrow enough to only fire on the well-known transient
+// teardown messages, so false positives are highly unlikely.
 func isTransientConnError(err error) bool {
-	return errors.Is(err, syscall.EPIPE) ||
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, syscall.EPIPE) ||
 		errors.Is(err, syscall.ECONNRESET) ||
-		errors.Is(err, net.ErrClosed)
+		errors.Is(err, syscall.ECONNABORTED) ||
+		errors.Is(err, net.ErrClosed) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "forcibly closed") || // WSAECONNRESET on Windows
+		strings.Contains(msg, "aborted by the software") || // WSAECONNABORTED on Windows
+		strings.Contains(msg, "use of closed network connection")
 }
 
 func reportAPIErrorsMetric(response *http.Response, err error, endpoint string) {
