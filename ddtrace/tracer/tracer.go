@@ -841,13 +841,9 @@ func spanStart(operationName string, sharedAttrs *traceinternal.SpanAttributes, 
 		pprofContext = opts.Context
 	)
 
-	// Snapshot parent fields before acquireSpan: the pool may later recycle
-	// the parent, invalidating context.span reads.
-	hasLocalParent := false
 	if opts.Parent != nil {
 		context = opts.Parent
 		if context.span != nil {
-			hasLocalParent = true
 			// Batch read service and pprofContext from parent span under single lock
 			// to minimize lock contention on the parent span during child creation.
 			inheritedData := context.span.inheritedData()
@@ -900,7 +896,7 @@ func spanStart(operationName string, sharedAttrs *traceinternal.SpanAttributes, 
 		if p, ok := context.SamplingPriority(); ok {
 			span.setMetricInit(keySamplingPriority, float64(p))
 		}
-		if !hasLocalParent && context.origin != "" { // +checklocksignore - Read-only after init.
+		if context.span == nil && context.origin != "" { // +checklocksignore - Read-only after init.
 			// mark origin
 			span.setMetaInit(keyOrigin, context.origin) // +checklocksignore - Read-only after init.
 		}
@@ -920,7 +916,7 @@ func spanStart(operationName string, sharedAttrs *traceinternal.SpanAttributes, 
 	// setTags takes s.mu internally. Tags may override service name
 	// (ServiceName option), so the top-level check below runs after.
 	span.setTags(opts.Tags)
-	isRootSpan := context == nil || !hasLocalParent
+	isRootSpan := context == nil || context.span == nil
 	span.mu.Lock()
 	if isRootSpan || parentService != span.service {
 		// The span is the local root span.

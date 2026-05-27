@@ -193,10 +193,8 @@ func (s *Span) clear() {
 	// clear() is called after traceWriter.add() encodes the span, so in-place
 	// map clearing is safe — no concurrent encoder holds a reference.
 	s.meta.Reset()
-	for k := range s.metrics {
-		delete(s.metrics, k)
-	}
-	s.metaStruct = nil
+	clear(s.metrics)
+	clear(s.metaStruct)
 	s.name = ""
 	s.service = ""
 	s.resource = ""

@@ -16,10 +16,12 @@ import (
 )
 
 // activeSpanContextKey is a context key for the snapshotted SpanContext.
-// When a Span is stored in a Go context via ContextWithSpan, we also
-// snapshot its SpanContext at that point. This protects against span pooling:
-// if the Span is recycled, StartSpanFromContext can still use the original
-// SpanContext to parent child spans correctly.
+// When a Span is stored in a Go context via ContextWithSpan, we also snapshot
+// its SpanContext so that StartSpanFromContext reads the original parent
+// identity (traceID, spanID, sampling priority) even after the *Span is
+// recycled and its s.context field replaced. This does NOT protect the
+// underlying trace from being finished or flushed; callers must ensure the
+// parent's trace lifetime exceeds child span creation.
 type activeSpanContextKey struct{}
 
 // ContextWithSpan returns a copy of the given context which includes the span s.
