@@ -684,7 +684,7 @@ func TestAppSecAPISecurityBodyParsingEnabled(t *testing.T) {
 
 		// Check for api security schema
 		span := finished[0]
-		require.Equal(t, `[{"host":[[[8]],{"len":1}],"user-agent":[[[8]],{"len":1}]}]`, span.Tag("_dd.appsec.s.req.headers"))
+		require.Equal(t, `[{"grpc-accept-encoding":[[[8]],{"len":1}],"host":[[[8]],{"len":1}],"user-agent":[[[8]],{"len":1}]}]`, span.Tag("_dd.appsec.s.req.headers"))
 		require.Nil(t, span.Tag("_dd.appsec.s.req.body"))
 		require.Equal(t, `[{"content-type":[[[8]],{"len":1}]}]`, span.Tag("_dd.appsec.s.res.headers"))
 		require.Nil(t, span.Tag("_dd.appsec.s.res.body"))
@@ -709,7 +709,7 @@ func TestAppSecAPISecurityBodyParsingEnabled(t *testing.T) {
 
 		// Check for api security schema
 		span := finished[0]
-		require.Equal(t, `[{"content-type":[[[8]],{"len":1}],"host":[[[8]],{"len":1}],"user-agent":[[[8]],{"len":1}]}]`, span.Tag("_dd.appsec.s.req.headers"))
+		require.Equal(t, `[{"content-type":[[[8]],{"len":1}],"grpc-accept-encoding":[[[8]],{"len":1}],"host":[[[8]],{"len":1}],"user-agent":[[[8]],{"len":1}]}]`, span.Tag("_dd.appsec.s.req.headers"))
 		require.Equal(t, `[{"hello_request_body":[8]}]`, span.Tag("_dd.appsec.s.req.body"))
 		require.Equal(t, `[{"content-type":[[[8]],{"len":1}]}]`, span.Tag("_dd.appsec.s.res.headers"))
 		require.Nil(t, span.Tag("_dd.appsec.s.res.body"))
@@ -734,7 +734,7 @@ func TestAppSecAPISecurityBodyParsingEnabled(t *testing.T) {
 
 		// Check for api security schema
 		span := finished[0]
-		require.Equal(t, `[{"host":[[[8]],{"len":1}],"user-agent":[[[8]],{"len":1}]}]`, span.Tag("_dd.appsec.s.req.headers"))
+		require.Equal(t, `[{"grpc-accept-encoding":[[[8]],{"len":1}],"host":[[[8]],{"len":1}],"user-agent":[[[8]],{"len":1}]}]`, span.Tag("_dd.appsec.s.req.headers"))
 		require.Nil(t, span.Tag("_dd.appsec.s.req.body"))
 		require.Equal(t, `[{"content-type":[[[8]],{"len":1}]}]`, span.Tag("_dd.appsec.s.res.headers"))
 		require.Equal(t, `[{"hello_response_body":[8]}]`, span.Tag("_dd.appsec.s.res.body"))
@@ -759,7 +759,7 @@ func TestAppSecAPISecurityBodyParsingEnabled(t *testing.T) {
 
 		// Check for api security schema
 		span := finished[0]
-		require.Equal(t, `[{"content-type":[[[8]],{"len":1}],"host":[[[8]],{"len":1}],"user-agent":[[[8]],{"len":1}]}]`, span.Tag("_dd.appsec.s.req.headers"))
+		require.Equal(t, `[{"content-type":[[[8]],{"len":1}],"grpc-accept-encoding":[[[8]],{"len":1}],"host":[[[8]],{"len":1}],"user-agent":[[[8]],{"len":1}]}]`, span.Tag("_dd.appsec.s.req.headers"))
 		require.Equal(t, `[{"hello_request_body":[8]}]`, span.Tag("_dd.appsec.s.req.body"))
 		require.Equal(t, `[{"content-type":[[[8]],{"len":1}]}]`, span.Tag("_dd.appsec.s.res.headers"))
 		require.Equal(t, `[{"hello_response_body":[8]}]`, span.Tag("_dd.appsec.s.res.body"))
