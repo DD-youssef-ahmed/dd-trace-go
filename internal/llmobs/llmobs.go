@@ -50,6 +50,7 @@ const (
 	baggageKeyExperimentID           = "_ml_obs.experiment_id"
 	baggageKeyExperimentRunID        = "_ml_obs.experiment_run_id"
 	baggageKeyExperimentRunIteration = "_ml_obs.experiment_run_iteration"
+	baggageKeyExperimentProjectID    = "_ml_obs.experiment_project_id"
 )
 
 const (
@@ -96,6 +97,7 @@ type llmobsContext struct {
 	metadata map[string]any
 	metrics  map[string]float64
 	tags     map[string]string
+	costTags []string
 
 	// agent specific
 	agentManifest string
@@ -491,14 +493,13 @@ func (l *LLMObs) llmobsSpanEvent(span *Span) *transport.LLMObsSpanEvent {
 	}
 
 	metadata := span.llmCtx.metadata
-	if metadata == nil {
+	if len(metadata) > 0 {
+		metadata = maps.Clone(metadata)
+	} else {
 		metadata = make(map[string]any)
 	}
 	if spanKind == SpanKindAgent && span.llmCtx.agentManifest != "" {
 		metadata["agent_manifest"] = span.llmCtx.agentManifest
-	}
-	if len(metadata) > 0 {
-		meta["metadata"] = metadata
 	}
 
 	input := make(map[string]any)
@@ -618,6 +619,12 @@ func (l *LLMObs) llmobsSpanEvent(span *Span) *transport.LLMObsSpanEvent {
 	}
 
 	maps.Copy(tags, span.llmCtx.tags)
+
+	setMetadataCostTags(metadata, validateCostTags(span, tags))
+	if len(metadata) > 0 {
+		meta["metadata"] = metadata
+	}
+
 	tagsSlice := make([]string, 0, len(tags))
 	for k, v := range tags {
 		tagsSlice = append(tagsSlice, fmt.Sprintf("%s:%s", k, v))
@@ -673,6 +680,53 @@ func (l *LLMObs) llmobsSpanEvent(span *Span) *transport.LLMObsSpanEvent {
 		trackSpanEventSize(ev, actualSize, truncated)
 	}
 	return ev
+}
+
+// validateCostTags filters the span's annotated cost tags against the final
+// event tag set, drops entries that don't reference an emitted tag key, and
+// emits the cost-tags-submitted telemetry. It must run after the final tags
+// map is fully assembled, so cost tags referencing SDK-injected keys (e.g.
+// session_id from WithSessionID or propagation, integration, ml_app) are
+// accepted.
+func validateCostTags(span *Span, finalTags map[string]string) []string {
+	costTags := span.llmCtx.costTags
+	if len(costTags) == 0 {
+		return nil
+	}
+
+	validated := make([]string, 0, len(costTags))
+	missing := 0
+	for _, costTag := range costTags {
+		if _, ok := finalTags[costTag]; !ok {
+			log.Warn("llmobs: cost_tags entry %q must reference a key present in span tags. Skipping entry.", costTag)
+			missing++
+			continue
+		}
+		validated = append(validated, costTag)
+	}
+
+	if missing > 0 {
+		trackCostTagsSubmitted(span, missing, "annotate", "error", "missing_span_tag")
+	}
+	if len(validated) > 0 {
+		trackCostTagsSubmitted(span, len(validated), "annotate", "success", "none")
+	}
+	return validated
+}
+
+func setMetadataCostTags(metadata map[string]any, costTags []string) {
+	if len(costTags) == 0 {
+		return
+	}
+
+	ddMetadata, ok := metadata["_dd"].(map[string]any)
+	if ok {
+		ddMetadata = maps.Clone(ddMetadata)
+	} else {
+		ddMetadata = make(map[string]any)
+	}
+	ddMetadata["cost_tags"] = append([]string(nil), costTags...)
+	metadata["_dd"] = ddMetadata
 }
 
 func dropSpanEventIO(ev *transport.LLMObsSpanEvent) bool {
@@ -763,7 +817,8 @@ func (l *LLMObs) StartSpan(ctx context.Context, kind SpanKind, name string, cfg 
 	experimentID := apmSpan.BaggageItem(baggageKeyExperimentID)
 	experimentRunID := apmSpan.BaggageItem(baggageKeyExperimentRunID)
 	experimentRunIteration := apmSpan.BaggageItem(baggageKeyExperimentRunIteration)
-	if experimentID != "" || experimentRunID != "" || experimentRunIteration != "" {
+	experimentProjectID := apmSpan.BaggageItem(baggageKeyExperimentProjectID)
+	if experimentID != "" || experimentRunID != "" || experimentRunIteration != "" || experimentProjectID != "" {
 		if span.llmCtx.tags == nil {
 			span.llmCtx.tags = make(map[string]string)
 		}
@@ -777,6 +832,9 @@ func (l *LLMObs) StartSpan(ctx context.Context, kind SpanKind, name string, cfg 
 		if experimentRunIteration != "" {
 			span.llmCtx.tags["run_iteration"] = experimentRunIteration
 		}
+		if experimentProjectID != "" {
+			span.llmCtx.tags["project_id"] = experimentProjectID
+		}
 	}
 
 	log.Debug("llmobs: starting LLMObs span: %s, span_kind: %s, ml_app: %s", spanName, kind, span.mlApp)
@@ -788,6 +846,7 @@ type ExperimentInfo struct {
 	ID           string
 	RunID        string
 	RunIteration int
+	ProjectID    string
 }
 
 // StartExperimentSpan starts a new experiment span with the given name and configuration.
@@ -805,6 +864,9 @@ func (l *LLMObs) StartExperimentSpan(ctx context.Context, name string, params Ex
 	}
 	if params.RunIteration > 0 {
 		span.apm.SetBaggageItem(baggageKeyExperimentRunIteration, fmt.Sprintf("%d", params.RunIteration))
+	}
+	if params.ProjectID != "" {
+		span.apm.SetBaggageItem(baggageKeyExperimentProjectID, params.ProjectID)
 	}
 	return span, ctx
 }
