@@ -175,7 +175,7 @@ func (h *agentTraceWriter) flush() {
 				return
 			}
 
-			if attempt+1%5 == 0 {
+			if (attempt+1)%5 == 0 {
 				log.Error("failure sending traces (attempt %d of %d): %v", attempt+1, h.config.sendRetries+1, err.Error())
 			}
 			p.reset()

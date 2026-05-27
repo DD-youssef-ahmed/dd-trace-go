@@ -7,12 +7,15 @@ package tracer
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	pb "github.com/DataDog/datadog-agent/pkg/proto/pbgo/trace"
@@ -29,6 +32,15 @@ const (
 	// headerComputedTopLevel specifies that the client has marked top-level spans, when set.
 	// Any non-empty value will mean 'yes'.
 	headerComputedTopLevel = "Datadog-Client-Computed-Top-Level"
+
+	// idempotencyKeyHeader marks a POST request as safe to replay. The Go HTTP
+	// transport treats requests carrying this header as idempotent and will
+	// transparently retry them on transient connection errors (e.g. an idle
+	// keep-alive connection silently closed by the agent), provided the request
+	// body can be re-read via req.GetBody. See
+	// https://github.com/golang/go/issues/19943 and net/http.Request.isReplayable.
+	// The agent ignores this header.
+	idempotencyKeyHeader = "Idempotency-Key"
 )
 
 const (
@@ -132,7 +144,11 @@ func (t *httpTransport) sendStats(p *pb.ClientStatsPayload, tracerObfuscationVer
 	if tracerObfuscationVersion > 0 {
 		req.Header.Set(obfuscationVersionHeader, strconv.Itoa(tracerObfuscationVersion))
 	}
-	resp, err := t.client.Do(req)
+	// Mark the POST replayable so net/http transparently retries on a fresh
+	// connection when an idle UDS conn was silently closed by the agent.
+	// http.NewRequest already populates req.GetBody for *bytes.Buffer bodies.
+	req.Header.Set(idempotencyKeyHeader, newIdempotencyKey())
+	resp, err := t.doWithStaleConnRetry(req)
 	if err != nil {
 		reportAPIErrorsMetric(resp, err, statsAPIPath)
 		return err
@@ -161,11 +177,22 @@ func (t *httpTransport) send(p payload) (body io.ReadCloser, err error) {
 	}
 	stats := p.stats()
 	req.ContentLength = int64(stats.size)
+	// Mark the POST replayable so net/http transparently retries on a fresh
+	// connection when an idle UDS conn was silently closed by the agent.
+	// http.NewRequest does not auto-populate GetBody for the custom payload
+	// type, so we set it explicitly. The returned reader is wrapped in
+	// io.NopCloser to avoid closing the payload from the stdlib's retry path —
+	// the writer's own retry loop manages the payload's lifecycle.
+	req.GetBody = func() (io.ReadCloser, error) {
+		p.reset()
+		return io.NopCloser(p), nil
+	}
 	for header, value := range t.headers {
 		req.Header.Set(header, value)
 	}
 	req.Header.Set(traceCountHeader, strconv.Itoa(stats.itemCount))
 	req.Header.Set(headerComputedTopLevel, "t")
+	req.Header.Set(idempotencyKeyHeader, newIdempotencyKey())
 	if t := getGlobalTracer(); t != nil {
 		tc := t.TracerConf()
 		if tc.TracingAsTransport || tc.CanComputeStats {
@@ -186,7 +213,7 @@ func (t *httpTransport) send(p payload) (body io.ReadCloser, err error) {
 		req.Header.Set("Datadog-Client-Dropped-P0-Traces", strconv.Itoa(droppedTraces))
 		req.Header.Set("Datadog-Client-Dropped-P0-Spans", strconv.Itoa(droppedSpans))
 	}
-	response, err := t.client.Do(req)
+	response, err := t.doWithStaleConnRetry(req)
 	if err != nil {
 		reportAPIErrorsMetric(response, err, tracesAPIPath)
 		return nil, err
@@ -205,6 +232,66 @@ func (t *httpTransport) send(p payload) (body io.ReadCloser, err error) {
 		return nil, fmt.Errorf("%s", txt)
 	}
 	return response.Body, nil
+}
+
+// newIdempotencyKey returns a 128-bit random hex string suitable for use as
+// an Idempotency-Key header value. The Go HTTP transport only checks for the
+// header's presence (see net/http.Request.isReplayable), so any non-empty value
+// works; the random value preserves the standard semantics of the header for
+// any intermediary that does inspect it. The agent ignores this header.
+func newIdempotencyKey() string {
+	return strconv.FormatUint(randUint64(), 16) + strconv.FormatUint(randUint64(), 16)
+}
+
+// staleConnRetryAttempts is the number of times doWithStaleConnRetry will
+// re-issue a request after a transient connection error. Two retries are
+// enough to absorb the case where the first retry also lands on a stale conn
+// in the idle pool (which can happen if the agent is killing many idle conns
+// in a burst). The total request budget is therefore 3 attempts.
+const staleConnRetryAttempts = 2
+
+// doWithStaleConnRetry executes req and, on a transient connection error,
+// rewinds the body via req.GetBody and retries on a fresh connection.
+//
+// Idempotency-Key + GetBody let net/http auto-recover from most stale-idle UDS
+// races (the agent silently closes idle keep-alive conns under backpressure),
+// but stdlib will not retry once any byte of the request has been written —
+// even with Idempotency-Key set — because it can no longer classify the error
+// as nothingWrittenError. These extra application-level retries cover that
+// residual mid-write EPIPE/ECONNRESET window. See golang/go#19943.
+//
+// Retrying is safe: the agent dedups traces by span ID and ignores the
+// Idempotency-Key header, so a duplicate payload is harmless. We only retry
+// on the narrow set of errors that signal a connection torn down by the peer.
+func (t *httpTransport) doWithStaleConnRetry(req *http.Request) (*http.Response, error) {
+	resp, err := t.client.Do(req)
+	for attempt := 0; attempt < staleConnRetryAttempts; attempt++ {
+		if err == nil || !isTransientConnError(err) || req.GetBody == nil {
+			return resp, err
+		}
+		body, gbErr := req.GetBody()
+		if gbErr != nil {
+			// Fall back to the original error — re-rewinding the body failed,
+			// so the caller will see the actual transport error rather than a
+			// confusing rewind failure.
+			return resp, err
+		}
+		req.Body = body
+		resp, err = t.client.Do(req)
+	}
+	return resp, err
+}
+
+// isTransientConnError reports whether err describes a connection torn down by
+// the peer mid-request — typically EPIPE on write or ECONNRESET on read after
+// an idle keep-alive UDS conn was silently closed by the agent. net.ErrClosed
+// is also included: stdlib calls Close() on a broken persistConn before the
+// error reaches the caller, so a concurrent writer racing against that close
+// may see "use of closed network connection" instead of the underlying EPIPE.
+func isTransientConnError(err error) bool {
+	return errors.Is(err, syscall.EPIPE) ||
+		errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, net.ErrClosed)
 }
 
 func reportAPIErrorsMetric(response *http.Response, err error, endpoint string) {
