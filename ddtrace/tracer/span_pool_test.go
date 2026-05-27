@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/DataDog/dd-trace-go/v2/ddtrace/ext"
 
@@ -59,7 +60,12 @@ func TestSpanPoolPayloadCorrectness(t *testing.T) {
 	require.NoError(t, err)
 	defer stop()
 
+	// Use explicit Start/Finish times so duration is deterministic across
+	// platforms with coarse clock resolution (e.g., Windows CI runners,
+	// where back-to-back now() calls can return identical values).
+	start := time.Now()
 	span := tracer.StartSpan("test.op",
+		StartTime(start),
 		Tag(ext.ManualKeep, true),
 		ServiceName("test.svc"),
 		ResourceName("/test"),
@@ -67,7 +73,7 @@ func TestSpanPoolPayloadCorrectness(t *testing.T) {
 		Tag("custom.key", "custom.val"),
 		Tag("custom.metric", 1.5),
 	)
-	span.Finish()
+	span.Finish(FinishTime(start.Add(time.Millisecond)))
 	flush(1)
 
 	traces := transport.Traces()
@@ -85,8 +91,8 @@ func TestSpanPoolPayloadCorrectness(t *testing.T) {
 	assert.Equal(t, int32(0), s.error)
 	assert.NotZero(t, s.spanID)
 	assert.NotZero(t, s.traceID)
-	assert.Greater(t, s.start, int64(0))
-	assert.Greater(t, s.duration, int64(0))
+	assert.Equal(t, start.UnixNano(), s.start)
+	assert.Equal(t, int64(time.Millisecond), s.duration)
 }
 
 func TestSpanPoolRecycledSpanNoStaleData(t *testing.T) {
