@@ -188,6 +188,9 @@ func (s *Span) clear() {
 	// channel send happens before the deferred unlock. Acquiring the lock
 	// here guarantees finish() has fully completed before we zero the struct.
 	s.mu.Lock()
+	if s.context != nil && s.context.trace != nil {
+		s.context.trace.clearRootIfSpan(s)
+	}
 	// s.context is intentionally not nilled: Context() may still be called
 	// after Finish(), and spanStart will reassign it on reuse.
 	// clear() is called after traceWriter.add() encodes the span, so in-place
@@ -600,7 +603,7 @@ func (s *Span) Root() *Span {
 	if ctx.trace == nil {
 		return nil
 	}
-	return ctx.trace.root
+	return ctx.trace.rootSpan()
 }
 
 // SetUser associates user information to the current trace which the
@@ -619,6 +622,9 @@ func (s *Span) SetUser(id string, opts ...UserMonitoringOption) {
 		fn(&cfg)
 	}
 	root := s.Root()
+	if root == nil {
+		root = s
+	}
 	trace := root.context.trace
 	root.mu.Lock()
 	defer root.mu.Unlock()

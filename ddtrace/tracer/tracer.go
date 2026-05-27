@@ -1121,7 +1121,14 @@ func (t *tracer) updateSampling(ctx *SpanContext) {
 		return
 	}
 	// without this check some mock spans tests fail
-	if t.rulesSampling == nil || ctx.trace == nil || ctx.trace.root == nil {
+	if t.rulesSampling == nil || ctx.trace == nil {
+		return
+	}
+	root := ctx.trace.rootSpan()
+	if root == nil {
+		// A local context can outlive its root span when span pooling releases the
+		// root. There is no live span left to resample; propagation still uses the
+		// immutable IDs and trace tags stored on the context and trace.
 		return
 	}
 	// want to avoid locking the entire trace from a span for long.
@@ -1138,7 +1145,7 @@ func (t *tracer) updateSampling(ctx *SpanContext) {
 		return
 	}
 	// if sampling was successful, need to lock the trace to prevent further re-sampling
-	if t.rulesSampling.SampleTrace(ctx.trace.root) {
+	if t.rulesSampling.SampleTrace(root) {
 		ctx.trace.setLocked(true)
 	}
 }

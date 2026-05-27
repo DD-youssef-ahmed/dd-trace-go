@@ -283,6 +283,7 @@ func TestSpanPoolContextSnapshotsInheritedData(t *testing.T) {
 	parent.Finish()
 	flush(1)
 	transport.Traces() // drain and release parent to the span pool
+	require.Nil(t, parentCtx.trace.rootSpan())
 
 	// Start another span after the parent was released so the pool may reuse and
 	// mutate the same *Span object that used to back parentCtx.
@@ -297,6 +298,36 @@ func TestSpanPoolContextSnapshotsInheritedData(t *testing.T) {
 
 	assert.Equal(t, "parent-updated", child.service)
 	assert.Equal(t, serviceSourceManual, child.serviceSource)
+	// The stale parent context must not keep the released root alive. A child
+	// started from it becomes the new local root for the continued trace.
+	assert.Equal(t, child, child.Root())
+}
+
+func TestSpanPoolStaleContextInjectAfterRootRelease(t *testing.T) {
+	t.Setenv(headerPropagationStyleInject, "tracecontext")
+	tracer, transport, flush, stop, err := startTestTracer(t,
+		WithSpanPool(true),
+		WithSamplingRules(TraceSamplingRules(Rule{NameGlob: "not-parent", Rate: 1})),
+	)
+	require.NoError(t, err)
+	defer stop()
+
+	parent := tracer.StartSpan("parent", ResourceName("parent"), WithSpanID(1))
+	parentCtx := parent.Context()
+	parent.Finish()
+	flush(1)
+	transport.Traces() // drain and release parent to the span pool
+
+	require.Nil(t, parentCtx.trace.rootSpan())
+	locked := parentCtx.trace.isLocked()
+	tracer.updateSampling(parentCtx)
+	assert.Equal(t, locked, parentCtx.trace.isLocked())
+
+	headers := TextMapCarrier(map[string]string{})
+	err = tracer.Inject(parentCtx, headers)
+	require.NoError(t, err)
+	assert.Contains(t, headers[traceparentHeader], fmt.Sprintf("-%016x-", parentCtx.spanID))
+	assert.Contains(t, headers[tracestateHeader], "p:"+spanIDHexEncoded(parentCtx.spanID, 16))
 }
 
 func BenchmarkSpanPoolRelease(b *testing.B) {

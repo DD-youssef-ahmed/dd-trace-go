@@ -881,8 +881,11 @@ func (*propagatorW3c) injectTextMap(spanCtx *SpanContext, writer TextMapWriter) 
 	// or if there is a span on the trace
 	// or the tracestateHeader doesn't start with `dd=`
 	// we need to recreate tracestate
+	// For remote contexts we only treat the trace as local once it has a live
+	// root span. A nil root can also mean a pooled root span was released; in
+	// that case we must not read the recycled span to decide recomposition.
 	if ctx.updated ||
-		(!ctx.isRemote || ctx.isRemote && ctx.trace != nil && ctx.trace.root != nil) ||
+		(!ctx.isRemote || ctx.isRemote && ctx.trace != nil && ctx.trace.rootSpan() != nil) ||
 		(ctx.trace != nil && !strings.HasPrefix(ctx.trace.propagatingTag(tracestateHeader), "dd=")) ||
 		ctx.trace.propagatingTagsLen() == 0 {
 		// compose a new value for the tracestate
