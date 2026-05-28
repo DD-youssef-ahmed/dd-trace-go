@@ -1126,9 +1126,7 @@ func (t *tracer) updateSampling(ctx *SpanContext) {
 	}
 	root := ctx.trace.rootSpan()
 	if root == nil {
-		// A local context can outlive its root span when span pooling releases the
-		// root. There is no live span left to resample; propagation still uses the
-		// immutable IDs and trace tags stored on the context and trace.
+		// Extracted contexts may not have a local root span yet.
 		return
 	}
 	// want to avoid locking the entire trace from a span for long.

@@ -572,7 +572,8 @@ type trace struct {
 
 	// root specifies the root of the trace, if known. It is nil when a span
 	// context is extracted from a carrier, at which point there are no spans in
-	// the trace yet, and after a pooled root span is released.
+	// the trace yet. Root spans are not returned to the span pool because this
+	// pointer may be read from contexts that outlive Finish.
 	root *Span
 }
 
@@ -731,14 +732,6 @@ func (t *trace) rootSpan() *Span {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.root
-}
-
-func (t *trace) clearRootIfSpan(s *Span) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.root == s {
-		t.root = nil
-	}
 }
 
 // push pushes a new span into the trace. If the buffer is full, it returns

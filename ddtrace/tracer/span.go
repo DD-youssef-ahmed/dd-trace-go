@@ -188,9 +188,24 @@ func (s *Span) clear() {
 	// channel send happens before the deferred unlock. Acquiring the lock
 	// here guarantees finish() has fully completed before we zero the struct.
 	s.mu.Lock()
-	if s.context != nil && s.context.trace != nil {
-		s.context.trace.clearRootIfSpan(s)
+	defer s.mu.Unlock()
+	s.clearLocked()
+}
+
+// clearForPool clears s unless it is the trace root. Root spans are kept out of
+// the pool because trace.root may be read from contexts that outlive Finish.
+func (s *Span) clearForPool() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.context != nil && s.context.trace != nil && s.context.trace.rootSpan() == s {
+		return false
 	}
+	s.clearLocked()
+	return true
+}
+
+// +checklocks:s.mu
+func (s *Span) clearLocked() {
 	// s.context is intentionally not nilled: Context() may still be called
 	// after Finish(), and spanStart will reassign it on reuse.
 	// clear() is called after traceWriter.add() encodes the span, so in-place
@@ -218,7 +233,6 @@ func (s *Span) clear() {
 	s.pprofCtxActive = nil
 	s.pprofCtxRestore = nil
 	s.taskEnd = nil
-	s.mu.Unlock()
 }
 
 // Context yields the SpanContext for this Span. Note that the return

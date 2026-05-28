@@ -282,15 +282,20 @@ func TestSpanPoolContextSnapshotsInheritedData(t *testing.T) {
 	parent.SetTag(ext.ServiceName, "parent-updated")
 	parent.Finish()
 	flush(1)
-	transport.Traces() // drain and release parent to the span pool
-	require.Nil(t, parentCtx.trace.rootSpan())
+	transport.Traces() // drain and release finished spans to the span pool
+	require.Equal(t, parent, parentCtx.trace.rootSpan())
+	assert.Equal(t, "parent", parent.name)
+	assert.Equal(t, "parent-updated", parent.service)
 
-	// Start another span after the parent was released so the pool may reuse and
-	// mutate the same *Span object that used to back parentCtx.
+	// Start another span after the parent finished. The root span must not be
+	// recycled and mutated by this new span while parentCtx can still reach it.
 	polluter := tracer.StartSpan("polluter", ServiceName("polluter-service"))
+	require.NotSame(t, parent, polluter)
 	polluter.Finish()
 	flush(1)
 	transport.Traces()
+	assert.Equal(t, "parent", parent.name)
+	assert.Equal(t, "parent-updated", parent.service)
 
 	child := tracer.StartSpan("child", ChildOf(parentCtx))
 	require.NotNil(t, child)
@@ -298,12 +303,10 @@ func TestSpanPoolContextSnapshotsInheritedData(t *testing.T) {
 
 	assert.Equal(t, "parent-updated", child.service)
 	assert.Equal(t, serviceSourceManual, child.serviceSource)
-	// The stale parent context must not keep the released root alive. A child
-	// started from it becomes the new local root for the continued trace.
-	assert.Equal(t, child, child.Root())
+	assert.Equal(t, parent, child.Root())
 }
 
-func TestSpanPoolStaleContextInjectAfterRootRelease(t *testing.T) {
+func TestSpanPoolStaleContextInjectAfterRootFinish(t *testing.T) {
 	t.Setenv(headerPropagationStyleInject, "tracecontext")
 	tracer, transport, flush, stop, err := startTestTracer(t,
 		WithSpanPool(true),
@@ -316,9 +319,9 @@ func TestSpanPoolStaleContextInjectAfterRootRelease(t *testing.T) {
 	parentCtx := parent.Context()
 	parent.Finish()
 	flush(1)
-	transport.Traces() // drain and release parent to the span pool
+	transport.Traces() // drain and release finished spans to the span pool
 
-	require.Nil(t, parentCtx.trace.rootSpan())
+	require.Equal(t, parent, parentCtx.trace.rootSpan())
 	locked := parentCtx.trace.isLocked()
 	tracer.updateSampling(parentCtx)
 	assert.Equal(t, locked, parentCtx.trace.isLocked())
