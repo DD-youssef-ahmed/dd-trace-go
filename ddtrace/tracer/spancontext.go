@@ -112,12 +112,21 @@ func (t *traceID) computeAndCacheHex() {
 // spawn a direct descendant of the span that it belongs to. It can be used
 // to create distributed tracing by propagating it using the provided interfaces.
 type SpanContext struct {
-	updated bool // updated is tracking changes for priority / origin / x-datadog-tags
+	updated  bool // updated is tracking changes for priority / origin / x-datadog-tags
+	isRemote bool
+	local    bool
+	// when true, indicates this context only propagates baggage items and should
+	// not be used for distributed tracing fields
+	// +checklocks:mu
+	baggageOnly bool
+	errors      atomic.Int32 // number of spans with errors in this trace
+	// atomic int for quick checking presence of baggage. 0 indicates no
+	// baggage, otherwise baggage exists.
+	hasBaggage uint32 // +checkatomic
 
 	// the below group should propagate only locally
 
-	trace  *trace       // reference to the trace that this span belongs too
-	errors atomic.Int32 // number of spans with errors in this trace
+	trace *trace // reference to the trace that this span belongs too
 
 	// The 16-character hex string of the last seen Datadog Span ID
 	// this value will be added as the _dd.parent_id tag to spans
@@ -128,8 +137,6 @@ type SpanContext struct {
 	// Missing parent span could occur when a W3C-compliant tracer
 	// propagated this context, but didn't send any spans to Datadog.
 	reparentID string
-	isRemote   bool
-	local      bool
 
 	// the below group should propagate cross-process
 
@@ -144,8 +151,6 @@ type SpanContext struct {
 	inherited inheritedData
 	// +checklocks:mu
 	sqlComment sqlCommentData
-	// atomic int for quick checking presence of baggage. 0 indicates no baggage, otherwise baggage exists.
-	hasBaggage uint32 // +checkatomic
 	// e.g. "synthetics"
 	// +checklocks:mu
 	origin string
@@ -153,9 +158,6 @@ type SpanContext struct {
 	// links to related spans in separate|external|disconnected traces
 	// +checklocks:mu
 	spanLinks []SpanLink
-	// when true, indicates this context only propagates baggage items and should not be used for distributed tracing fields
-	// +checklocks:mu
-	baggageOnly bool
 }
 
 type sqlCommentData struct {
